@@ -11,6 +11,7 @@
     "expect"
   ],
   "type": "library",
+  "license": "MIT",
   "authors": [
     {
       "name": "Mohammad Emran",
