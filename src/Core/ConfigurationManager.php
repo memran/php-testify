@@ -11,7 +11,7 @@ class ConfigurationManager
         $this->configuration = $this->loadConfiguration($configFile);
     }
 
-    public function loadConfiguration(?string $configFile = null): array
+    private function loadConfiguration(?string $configFile = null): array
     {
         if ($configFile && file_exists($configFile)) {
             return require $configFile;
@@ -34,31 +34,12 @@ class ConfigurationManager
         return $this->getDefaultConfiguration();
     }
 
-    public function getDefaultConfiguration(): array
+    private function getDefaultConfiguration(): array
     {
         return [
             'bootstrap' => 'vendor/autoload.php',
             'colors' => 'always',
-            'verbose' => true,
             'stopOnFailure' => false,
-            'processIsolation' => false,
-            'backupGlobals' => false,
-            'backupStaticAttributes' => false,
-            'convertDeprecationsToExceptions' => false,
-            'convertErrorsToExceptions' => true,
-            'convertNoticesToExceptions' => true,
-            'convertWarningsToExceptions' => true,
-            'testSuite' => [
-                'name' => 'Testify Test Suite',
-                'directories' => ['tests']
-            ],
-            'php' => [
-                'ini' => [
-                    'error_reporting' => '-1',
-                    'display_errors' => '1',
-                    'display_startup_errors' => '1'
-                ]
-            ]
         ];
     }
 

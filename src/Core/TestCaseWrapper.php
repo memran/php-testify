@@ -4,7 +4,6 @@ namespace Testify\Core;
 
 use PHPUnit\Framework\TestCase;
 use Testify\Core\Contracts\LifecycleManagerInterface;
-use Testify\PHPTestify;
 
 class TestCaseWrapper extends TestCase
 {
@@ -29,14 +28,7 @@ class TestCaseWrapper extends TestCase
 
         try {
             ($this->testCallback)();
-            // Report success
-            PHPTestify::getInstance()->getTestReporter()->reportSuccess($this->testName);
         } catch (\Throwable $e) {
-            // Report failure
-            PHPTestify::getInstance()->getTestReporter()->reportFailure(
-                $this->testName,
-                $e->getMessage()
-            );
             throw $e;
         } finally {
             $this->lifecycleManager->executeAfterEach();

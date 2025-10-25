@@ -5,8 +5,6 @@ namespace Testify;
 function describe(string $description, callable $callback): void
 {
     PHPTestify::getInstance()->describe($description, $callback);
-    // Report suite completion after describe block
-    // PHPTestify::getInstance()->getTestReporter()->reportSuiteCompletion();
 }
 
 function test(string $description, callable $callback): void

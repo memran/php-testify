@@ -4,7 +4,7 @@ namespace Testify;
 
 use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
 use PHPUnit\TextUI\TestRunner as PHPUnitTestRunner;
-use Testify\Core\{TestSuite, TestReporter, TestCaseFactory, LifecycleManager};
+use Testify\Core\{TestSuite, TestReporter, TestCaseFactory, LifecycleManager, ConfigurationManager};
 use Testify\Core\Contracts\TestSuiteInterface;
 use Testify\Core\Contracts\TestRunnerInterface;
 use Testify\Core\Contracts\LifecycleManagerInterface;
@@ -18,7 +18,6 @@ class PHPTestify implements TestRunnerInterface
     private TestReporter $testReporter;
     private string $currentDescribe = '';
     private array $testResults = [];
-    private float $startTime = 0;
     private array $configuration;
 
     public function __construct(
@@ -88,8 +87,6 @@ class PHPTestify implements TestRunnerInterface
 
     public function run(): void
     {
-        $this->startTime = microtime(true);
-        $this->testResults = ['passed' => 0, 'failed' => 0];
 
         $this->lifecycleManager->executeBeforeAll();
 
@@ -104,18 +101,12 @@ class PHPTestify implements TestRunnerInterface
             $phpUnitSuite->addTest($testCase);
         }
 
+
         $configuration = $this->createPHPUnitConfiguration();
+        $configuration['printer'] = $this->testReporter;
         $runner = new PHPUnitTestRunner();
-
-        ob_start();
         $result = $runner->run($phpUnitSuite, $configuration);
-        $output = ob_get_clean();
-
-        //$this->processTestResults($result, $output);
-
         $this->lifecycleManager->executeAfterAll();
-
-        //$this->reportFinalSummary();
 
         exit($result->wasSuccessful() ? 0 : 1);
     }
@@ -123,21 +114,11 @@ class PHPTestify implements TestRunnerInterface
     private function loadDefaultConfiguration(): array
     {
         $configFile = __DIR__ . '/../../phpunit.config.php';
-        if (file_exists($configFile)) {
-            return require $configFile;
-        }
-
-        // Fallback to minimal configuration
-        return [
-            'bootstrap' => 'vendor/autoload.php',
-            'colors' => 'always',
-            'verbose' => true,
-            'stopOnFailure' => false
-        ];
+        return (new ConfigurationManager($configFile))->getAll();
     }
-
     private function createPHPUnitConfiguration(): array
     {
+
         $config = [
             'extensions' => [],
             'loadedExtensions' => [],
@@ -184,21 +165,6 @@ class PHPTestify implements TestRunnerInterface
         return $config;
     }
 
-    private function processTestResults($result, string $output): void
-    {
-        $this->testResults['passed'] = $result->count() - $result->failureCount() - $result->errorCount();
-        $this->testResults['failed'] = $result->failureCount() + $result->errorCount();
-    }
-
-    private function reportFinalSummary(): void
-    {
-        $duration = round(microtime(true) - $this->startTime, 2);
-        $this->testReporter->reportSummary(
-            $this->testResults['passed'],
-            $this->testResults['failed'],
-            $duration
-        );
-    }
 
     public function getConfiguration(): array
     {
