@@ -1,6 +1,15 @@
-# PHP-Testify
+# 🧪 PHP-Testify
 
 A modern, expressive testing library for PHP with a fluent and intuitive API, built on top of PHPUnit.
+
+## 📦 Stats & Status
+
+![PHP Version](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)
+![Downloads](https://img.shields.io/packagist/dt/memran/php-testify?style=for-the-badge)
+![Version](https://img.shields.io/packagist/v/memran/php-testify?style=for-the-badge)
+
+**Supported PHP Versions:** 8.0, 8.1, 8.2, 8.3, 8.4
 
 ## Installation
 
