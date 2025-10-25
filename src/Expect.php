@@ -174,6 +174,21 @@ final class Expect
                 : "Expected exception {$exceptionClass}, but nothing was thrown"
         );
     }
+    public function toBeSameObject(object $expected): void
+    {
+        $this->check(
+            $this->value === $expected,
+            "Expected both variables to reference the same object"
+        );
+    }
+
+    public function notToBeSameObject(object $expected): void
+    {
+        $this->check(
+            $this->value !== $expected,
+            "Expected variables to reference different objects"
+        );
+    }
 
     public function toBeInstanceOf(string $className): void
     {
