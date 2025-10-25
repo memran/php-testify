@@ -1,6 +1,15 @@
 {
   "name": "memran/php-testify",
   "description": "A modern, expressive testing library for PHP that makes writing tests enjoyable and readable.",
+  "keywords": [
+    "phpunit",
+    "test",
+    "vitest",
+    "jest",
+    "watch",
+    "bdd",
+    "expect"
+  ],
   "type": "library",
   "authors": [
     {
