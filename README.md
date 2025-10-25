@@ -86,7 +86,7 @@ When enabled, it automatically re-runs your tests whenever any source or test fi
 
 ### ▶️ Run in Watch Mode
 
-````bash
+```bash
 composer test -- --watch
 ```
 
@@ -106,7 +106,7 @@ describe('User authentication', function() {
         // Tests go here
     });
 });
-````
+```
 
 ## Writing Tests
 
