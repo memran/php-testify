@@ -1,32 +1,56 @@
 #!/usr/bin/env php
 <?php
 
-require __DIR__ . '/../vendor/autoload.php';
+// Try to locate Composer's autoloader in two scenarios:
+// 1. Running php-testify in its own repo (dev mode).
+// 2. Running php-testify as a dependency from another project.
+$autoloadCandidates = [
+    // php-testify repo root (php-testify/vendor/autoload.php)
+    __DIR__ . '/../vendor/autoload.php',
+    // consuming project's root (yourApp/vendor/autoload.php)
+    __DIR__ . '/../../../autoload.php',
+];
+
+$autoloadLoaded = false;
+foreach ($autoloadCandidates as $path) {
+    if (is_file($path)) {
+        require $path;
+        $autoloadLoaded = true;
+        break;
+    }
+}
+
+if (!$autoloadLoaded) {
+    fwrite(STDERR, "[php-testify] Fatal: could not locate Composer autoload.php\n");
+    fwrite(STDERR, "Tried:\n");
+    foreach ($autoloadCandidates as $p) {
+        fwrite(STDERR, " - {$p}\n");
+    }
+    exit(1);
+}
 
 use Testify\Runner;
 use Testify\Watcher;
 
-/**
- * Supported CLI flags:
- *   --filter <pattern>
- *   --no-colors
- *   --verbose
- *   --watch
- */
+// Path to the consuming project's phpunit.config.php.
+// We assume it's at project root (same place you'd run composer).
+$configFile = getcwd() . DIRECTORY_SEPARATOR . 'phpunit.config.php';
+if (!is_file($configFile)) {
+    fwrite(STDERR, "[php-testify] Fatal: phpunit.config.php not found in project root (" . $configFile . ")\n");
+    exit(1);
+}
 
-$configFile = __DIR__ . '/../phpunit.config.php';
-
+// Parse CLI flags passed to this script.
 $args = $argv;
 array_shift($args); // remove script name
 
 $options = [
-    'filter'    => null,
-    'colors'    => true,
-    'verbose'   => false,
-    'watch'     => false,
+    'filter'  => null,
+    'colors'  => true,
+    'verbose' => false,
+    'watch'   => false,
 ];
 
-// crude parse
 for ($i = 0; $i < count($args); $i++) {
     $arg = $args[$i];
 
@@ -60,8 +84,8 @@ for ($i = 0; $i < count($args); $i++) {
     exit(1);
 }
 
+// --watch mode: keep process alive, rerun tests on file change
 if ($options['watch'] === true) {
-    // Launch watch mode. Watcher will spawn fresh php processes for each run.
     $watcher = new Watcher(
         $configFile,
         [
@@ -72,16 +96,18 @@ if ($options['watch'] === true) {
     );
 
     $watcher->watchLoop();
-    // watchLoop() is long-running; when it eventually returns we exit 0.
     exit(0);
 }
 
-// Non-watch mode: run tests once now
-$runner = new Runner($configFile, [
-    'filter'  => $options['filter'],
-    'colors'  => $options['colors'],
-    'verbose' => $options['verbose'],
-]);
+// normal one-shot run
+$runner = new Runner(
+    $configFile,
+    [
+        'filter'  => $options['filter'],
+        'colors'  => $options['colors'],
+        'verbose' => $options['verbose'],
+    ]
+);
 
 $exitCode = $runner->run();
 exit($exitCode);
