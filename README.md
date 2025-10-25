@@ -68,6 +68,28 @@ Run your tests:
 php tests/ExampleTest.php
 ```
 
+---
+
+## 👀 Watch Mode
+
+`php-testify` includes a **built-in watch mode** — just like Vitest or Jest — for instant feedback during development.
+
+When enabled, it automatically re-runs your tests whenever any source or test file changes.
+
+### 🧠 How it Works
+
+- Monitors all `.php` files in your `src/` and `tests/` directories.
+- Detects file changes using a lightweight polling system (works on Windows, macOS, and Linux).
+- Spawns a fresh PHP process for each re-run — ensuring a clean test environment.
+- Clears the screen before each re-run and prints a banner for visibility.
+- Keeps running until you stop it manually (Ctrl + C).
+
+### ▶️ Run in Watch Mode
+
+````bash
+composer test -- --watch
+```
+
 ## Core API
 
 ### Test Structure
@@ -84,7 +106,7 @@ describe('User authentication', function() {
         // Tests go here
     });
 });
-```
+````
 
 ## Writing Tests
 
