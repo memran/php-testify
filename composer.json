@@ -10,14 +10,14 @@
   ],
   "require": {
     "php": "^8.0",
-    "phpunit/phpunit": "^9.0|| ^10.0"
+    "phpunit/phpunit": " ^11.0"
   },
   "autoload": {
     "psr-4": {
       "Testify\\": "src/"
     },
     "files": [
-      "src/globals.php"
+      "src/testify.php"
     ]
   },
   "autoload-dev": {
@@ -26,27 +26,7 @@
     }
   },
   "scripts": {
-    "test": "php tests/run.php",
-    "test:quick": "php tests/run.php",
-    "test:config": "@php -r \"if (file_exists('phpunit.config.php')) { print_r(require 'phpunit.config.php'); } else { echo 'No phpunit.config.php found. Using defaults.\\n'; }\"",
-    "test:coverage": "vendor/bin/phpunit --coverage-html coverage",
-    "test:unit": "php tests/run.php",
-    "test:feature": "php tests/run.php",
-    "test:watch": "find src tests -name \"*.php\" | entr -c composer test:quick",
-    "test:all": [
-      "@test:unit",
-      "@test:feature"
-    ]
-  },
-  "scripts-descriptions": {
-    "test": "Run all test suites using PHP-Testify",
-    "test:quick": "Run tests quickly using PHP-Testify",
-    "test:config": "Show current test configuration",
-    "test:coverage": "Generate coverage report (requires PHPUnit)",
-    "test:unit": "Run unit tests",
-    "test:feature": "Run feature tests",
-    "test:watch": "Watch for file changes and run tests automatically",
-    "test:all": "Run all test types sequentially"
+    "test": "php bin/testify"
   },
   "minimum-stability": "stable",
   "prefer-stable": true
