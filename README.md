@@ -1,11 +1,33 @@
 # PHP-Testify
 
-A modern, expressive testing library for PHP with a fluent and intuitive API.
+A modern, expressive testing library for PHP with a fluent and intuitive API, built on top of PHPUnit.
 
 ## Installation
 
 ```bash
 composer require memran/php-testify --dev
+```
+
+## Configuration
+
+Create `phpunit.config.php` in your project root:
+
+```bash
+<?php
+return [
+    'bootstrap' => __DIR__ . '/vendor/autoload.php',
+    'colors' => 'always',
+    'verbose' => true,
+    'stopOnFailure' => false,
+    'extensions' => [
+        'loadedExtensions' => [],
+        'notLoadedExtensions' => []
+    ],
+    'testSuite' => [
+        'name' => 'Testify Test Suite',
+        'directories' => ['tests']
+    ]
+];
 ```
 
 # Quick Start
@@ -65,7 +87,7 @@ describe('User authentication', function() {
 
 ## Writing Tests
 
-Use test or it to define individual test cases:
+Use `test` or `it` to define individual test cases:
 
 ```bash
 php
@@ -243,11 +265,34 @@ php test-runner.php
 
 ### Best Practices
 
-Descriptive test names: Use clear, descriptive names for describe blocks and tests
-One assertion per test: Focus each test on a single behavior
-Use lifecycle hooks: Set up test data in beforeEach rather than repeating code
-Keep tests independent: Tests should not depend on each other
-Test edge cases: Include tests for error conditions and boundary cases
+- **Descriptive test names**: Use clear, descriptive names for describe blocks and tests
+- **One assertion per test**: Focus each test on a single behavior
+- **Use lifecycle hooks**: Set up test data in beforeEach rather than repeating code
+- **Keep tests independent**: Tests should not depend on each other
+- **Test edge cases**: Include tests for error conditions and boundary cases
+
+### Available Commands
+
+```bash
+# Run all tests
+composer test
+
+# Show current configuration
+composer test:config
+
+# Run tests without coverage (faster)
+composer test:quick
+
+# Generate coverage report
+composer test:coverage
+
+# Watch for changes and run tests automatically
+composer test:watch
+
+# Run specific test types
+composer test:unit
+composer test:feature
+```
 
 # Contributing
 
