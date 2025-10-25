@@ -33,9 +33,7 @@ class LifecycleManager implements LifecycleManagerInterface
 
     public function executeBeforeEach(): void
     {
-        if (empty($this->beforeEachCallbacks)) {
-            return;
-        }
+
         foreach ($this->beforeEachCallbacks as $callback) {
             $callback();
         }

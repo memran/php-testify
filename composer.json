@@ -28,7 +28,7 @@
   "scripts": {
     "test": "php tests/run.php",
     "test:quick": "php tests/run.php",
-    "test:config": "php -r 'print_r(require \"phpunit.config.php\");'",
+    "test:config": "@php -r \"if (file_exists('phpunit.config.php')) { print_r(require 'phpunit.config.php'); } else { echo 'No phpunit.config.php found. Using defaults.\\n'; }\"",
     "test:coverage": "vendor/bin/phpunit --coverage-html coverage",
     "test:unit": "php tests/run.php",
     "test:feature": "php tests/run.php",

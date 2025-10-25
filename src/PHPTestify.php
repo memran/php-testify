@@ -4,7 +4,6 @@ namespace Testify;
 
 use PHPUnit\Framework\TestSuite as PHPUnitTestSuite;
 use PHPUnit\TextUI\TestRunner as PHPUnitTestRunner;
-use PHPUnit\TextUI\Configuration\Configuration;
 use Testify\Core\{TestSuite, TestReporter, TestCaseFactory, LifecycleManager};
 use Testify\Core\Contracts\TestSuiteInterface;
 use Testify\Core\Contracts\TestRunnerInterface;
@@ -47,7 +46,6 @@ class PHPTestify implements TestRunnerInterface
     public function describe(string $description, callable $callback): void
     {
         $this->currentDescribe = $description;
-        $this->testReporter->reportStart($description);
         $callback();
         $this->currentDescribe = '';
     }
@@ -113,11 +111,11 @@ class PHPTestify implements TestRunnerInterface
         $result = $runner->run($phpUnitSuite, $configuration);
         $output = ob_get_clean();
 
-        $this->processTestResults($result, $output);
+        //$this->processTestResults($result, $output);
 
         $this->lifecycleManager->executeAfterAll();
 
-        $this->reportFinalSummary();
+        //$this->reportFinalSummary();
 
         exit($result->wasSuccessful() ? 0 : 1);
     }
@@ -142,6 +140,8 @@ class PHPTestify implements TestRunnerInterface
     {
         $config = [
             'extensions' => [],
+            'loadedExtensions' => [],
+            'notLoadedExtensions' => [],
             'backupGlobals' => $this->configuration['backupGlobals'] ?? false,
             'backupStaticAttributes' => $this->configuration['backupStaticAttributes'] ?? false,
             'beStrictAboutChangesToGlobalState' => $this->configuration['beStrictAboutChangesToGlobalState'] ?? false,
