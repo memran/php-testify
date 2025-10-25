@@ -91,7 +91,7 @@ describe('User authentication', function() {
 Use `test` or `it` to define individual test cases:
 
 ```bash
-php
+<?php
 test('user can login with valid credentials', function() {
 // Test implementation
 });
@@ -338,38 +338,6 @@ describe('php-testify expectation API', function () {
 
 ```
 
-# Running Tests
-
-## Single Test File
-
-```bash
-php tests/YourTestFile.php
-```
-
-## Multiple Test Files
-
-Create a test runner:
-
-```bash
-<?php
-// test-runner.php
-
-require_once __DIR__ . '/vendor/autoload.php';
-
-// Include all test files
-foreach (glob(__DIR__ . '/tests/*.php') as $testFile) {
-    require_once $testFile;
-}
-
-runTests();
-```
-
-Then run:
-
-```bash
-php test-runner.php
-```
-
 ### Best Practices
 
 - **Descriptive test names**: Use clear, descriptive names for describe blocks and tests
@@ -384,21 +352,6 @@ php test-runner.php
 # Run all tests
 composer test
 
-# Show current configuration
-composer test:config
-
-# Run tests without coverage (faster)
-composer test:quick
-
-# Generate coverage report
-composer test:coverage
-
-# Watch for changes and run tests automatically
-composer test:watch
-
-# Run specific test types
-composer test:unit
-composer test:feature
 ```
 
 # Contributing
