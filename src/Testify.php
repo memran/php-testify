@@ -19,6 +19,12 @@ if (!\function_exists('it')) {
         TestSuite::getInstance()->addTest($name, $fn);
     }
 }
+if (!\function_exists('test')) {
+    function test(string $name, callable $fn): void
+    {
+        TestSuite::getInstance()->addTest($name, $fn);
+    }
+}
 
 if (!\function_exists('expect')) {
     function expect(mixed $actual): Expect
@@ -83,5 +89,49 @@ if (!\function_exists('runTestify')) {
         $printer->printExitLine($exitCode);
 
         return $exitCode;
+    }
+}
+
+if (!\function_exists('Testify\\beforeAll')) {
+    /**
+     * beforeAll(fn () => { ... });
+     * Runs once before ALL tests in the current describe() block.
+     */
+    function beforeAll(callable $fn): void
+    {
+        TestSuite::getInstance()->addBeforeAll($fn);
+    }
+}
+
+if (!\function_exists('Testify\\afterAll')) {
+    /**
+     * afterAll(fn () => { ... });
+     * Runs once after ALL tests in the current describe() block.
+     */
+    function afterAll(callable $fn): void
+    {
+        TestSuite::getInstance()->addAfterAll($fn);
+    }
+}
+
+if (!\function_exists('Testify\\beforeEach')) {
+    /**
+     * beforeEach(fn () => { ... });
+     * Runs before EACH it() in the current describe() block.
+     */
+    function beforeEach(callable $fn): void
+    {
+        TestSuite::getInstance()->addBeforeEach($fn);
+    }
+}
+
+if (!\function_exists('Testify\\afterEach')) {
+    /**
+     * afterEach(fn () => { ... });
+     * Runs after EACH it() in the current describe() block.
+     */
+    function afterEach(callable $fn): void
+    {
+        TestSuite::getInstance()->addAfterEach($fn);
     }
 }

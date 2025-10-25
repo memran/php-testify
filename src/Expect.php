@@ -2,81 +2,194 @@
 
 namespace Testify;
 
+use Throwable;
+
+/**
+ * Vitest/Jest-style fluent expectations.
+ */
 final class Expect
 {
-    private mixed $actual;
+    private mixed $value;
+    private bool $negate = false;
 
-    public function __construct(mixed $actual)
+    public function __construct(mixed $value)
     {
-        $this->actual = $actual;
+        $this->value = $value;
     }
 
     /**
-     * Strict identity (===).
+     * expect($x)->not()->toBeNull();
      */
-    public function toBe(mixed $expected, string $message = ''): void
+    public function not(): self
     {
-        if ($this->actual !== $expected) {
-            $this->throwFail(
-                $message !== '' ? $message : "Expected value to be (===) " . $this->export($expected) .
-                    " but got " . $this->export($this->actual)
-            );
+        $clone = clone $this;
+        $clone->negate = !$this->negate;
+        return $clone;
+    }
+
+    private function check(bool $condition, string $message): void
+    {
+        if ($this->negate) {
+            $condition = !$condition;
+            $message = 'NOT: ' . $message;
+        }
+
+        if (!$condition) {
+            throw new TestFailureException($message);
         }
     }
 
-    /**
-     * Loose equality (==).
-     */
-    public function toEqual(mixed $expected, string $message = ''): void
+    public function toBe(mixed $expected): void
     {
-        if ($this->actual != $expected) { // intentional loose comparison
-            $this->throwFail(
-                $message !== '' ? $message : "Expected value to equal (==) " . $this->export($expected) .
-                    " but got " . $this->export($this->actual)
+        $this->check(
+            $this->value === $expected,
+            "Expected {$this->repr($this->value)} to be {$this->repr($expected)}"
+        );
+    }
+
+    public function toEqual(mixed $expected): void
+    {
+        $this->check(
+            $this->value == $expected,
+            "Expected {$this->repr($this->value)} to equal {$this->repr($expected)}"
+        );
+    }
+
+    public function toBeTrue(): void
+    {
+        $this->check(
+            $this->value === true,
+            "Expected value to be true"
+        );
+    }
+
+    public function toBeFalse(): void
+    {
+        $this->check(
+            $this->value === false,
+            "Expected value to be false"
+        );
+    }
+
+    public function toBeNull(): void
+    {
+        $this->check(
+            $this->value === null,
+            "Expected value to be null"
+        );
+    }
+
+    public function toBeTruthy(): void
+    {
+        $this->check(
+            (bool)$this->value === true,
+            "Expected value to be truthy"
+        );
+    }
+
+    public function toBeFalsy(): void
+    {
+        $this->check(
+            (bool)$this->value === false,
+            "Expected value to be falsy"
+        );
+    }
+
+    public function toBeGreaterThan(float|int $threshold): void
+    {
+        $this->check(
+            $this->value > $threshold,
+            "Expected {$this->repr($this->value)} to be greater than {$threshold}"
+        );
+    }
+
+    public function toBeLessThan(float|int $threshold): void
+    {
+        $this->check(
+            $this->value < $threshold,
+            "Expected {$this->repr($this->value)} to be less than {$threshold}"
+        );
+    }
+
+    public function toContain(mixed $item): void
+    {
+        $v = $this->value;
+        $found = false;
+
+        if (is_string($v) && is_string($item)) {
+            $found = str_contains($v, $item);
+        } elseif (is_array($v)) {
+            $found = in_array($item, $v, true);
+        }
+
+        $this->check(
+            $found,
+            "Expected value to contain {$this->repr($item)}"
+        );
+    }
+
+    public function toHaveLength(int $len): void
+    {
+        $value = $this->value;
+
+        if (is_string($value)) {
+            $actual = strlen($value);
+        } elseif (is_array($value)) {
+            $actual = count($value);
+        } elseif (is_countable($value)) {
+            $actual = count($value);
+        } else {
+            $actual = 0;
+        }
+
+        $this->check(
+            $actual === $len,
+            "Expected length {$len}, got {$actual}"
+        );
+    }
+
+    public function toThrow(string $exceptionClass = Throwable::class): void
+    {
+        $fn = $this->value;
+
+        if (!is_callable($fn)) {
+            throw new TestFailureException(
+                "toThrow expects a callable, got " . gettype($fn)
             );
         }
-    }
 
-    public function toBeTrue(string $message = ''): void
-    {
-        if ($this->actual !== true) {
-            $this->throwFail(
-                $message !== '' ? $message : "Expected true but got " . $this->export($this->actual)
-            );
+        $thrown = null;
+        try {
+            $fn();
+        } catch (Throwable $e) {
+            $thrown = $e;
         }
+
+        $ok = $thrown instanceof $exceptionClass;
+
+        $this->check(
+            $ok,
+            $thrown
+                ? "Expected exception {$exceptionClass}, got " . get_class($thrown)
+                : "Expected exception {$exceptionClass}, but nothing was thrown"
+        );
     }
 
-    public function toBeFalse(string $message = ''): void
+    public function toBeInstanceOf(string $className): void
     {
-        if ($this->actual !== false) {
-            $this->throwFail(
-                $message !== '' ? $message : "Expected false but got " . $this->export($this->actual)
-            );
-        }
+        $this->check(
+            $this->value instanceof $className,
+            "Expected value to be instance of {$className}"
+        );
     }
 
-    public function toBeDefined(string $message = ''): void
+    private function repr(mixed $v): string
     {
-        if ($this->actual === null) {
-            $this->throwFail(
-                $message !== '' ? $message : "Expected value to be defined (not null)"
-            );
-        }
-    }
-
-    /**
-     * Helper: throw a consistent exception so TestCase::run() can catch it.
-     */
-    private function throwFail(string $msg): void
-    {
-        throw new TestFailureException($msg);
-    }
-
-    /**
-     * Pretty-print values in error output.
-     */
-    private function export(mixed $value): string
-    {
-        return var_export($value, true);
+        if (is_string($v)) return '"' . $v . '"';
+        if (is_bool($v)) return $v ? 'true' : 'false';
+        if ($v === null) return 'null';
+        if (is_array($v)) return 'array(' . count($v) . ')';
+        if (is_object($v)) return 'object(' . get_class($v) . ')';
+        return (string)$v;
     }
 }

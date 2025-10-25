@@ -9,16 +9,35 @@ use Throwable;
 
 use PHPUnit\Framework\TestCase as PhpUnitTestCase;
 
-
+/**
+ * Runner for php-testify.
+ *
+ * - PHPUnit tests + describe/it specs
+ * - Hooks: beforeAll / afterAll / beforeEach / afterEach
+ * - CLI flags: --filter, --no-colors, --verbose
+ * - Per-test & per-suite timing
+ * - Slowest-suites benchmark
+ * - Status: PASS / FAIL / SKIP / INCOMPLETE / WARN
+ * - Compact summary table
+ * 
+ */
 final class Runner
 {
     /** @var array<string,mixed> */
     private array $config;
 
+    /** @var array{filter:?string,colors:bool,verbose:bool} */
+    private array $options;
+
     /**
      * @param string $configFile Absolute path to phpunit.config.php
+     * @param array{filter:?string,colors:bool,verbose:bool} $options
      */
-    public function __construct(string $configFile)
+    public function __construct(string $configFile, array $options = [
+        'filter'  => null,
+        'colors'  => true,
+        'verbose' => false,
+    ])
     {
         if (!is_file($configFile)) {
             throw new RuntimeException("Config file not found: {$configFile}");
@@ -30,29 +49,31 @@ final class Runner
         }
 
         $this->config = $cfg;
+
+        $defaultColors = isset($cfg['colors']) ? (bool)$cfg['colors'] : true;
+
+        $this->options = [
+            'filter'  => $options['filter']  ?? null,
+            'colors'  => array_key_exists('colors', $options) ? (bool)$options['colors'] : $defaultColors,
+            'verbose' => (bool)($options['verbose'] ?? false),
+        ];
     }
 
     /**
-     * Entry point for composer test.
-     *
-     * @return int exit code (0 = all passed, 1 = any failed/error)
+     * Entry point. Returns exit code (0 = all green / no FAIL).
      */
     public function run(): int
     {
         $this->bootstrap();
         $this->loadTestsFromPatterns();
 
-        // materialize our describe()/it() specs into PHPUnit-compatible classes
+        // Bridge describe()/it() into generated PHPUnit-style classes
         $bridge = new SpecBridge();
         $bridge->materializeSpecClasses();
 
-        // Now actually execute everything
         return $this->executeAll();
     }
 
-    /**
-     * Load composer autoload, etc.
-     */
     private function bootstrap(): void
     {
         $bootstrapFile = $this->config['bootstrap'] ?? null;
@@ -68,15 +89,6 @@ final class Runner
         require $bootstrapFile;
     }
 
-    /**
-     * Bring all tests into memory.
-     *
-     * - For PHPUnit-style tests (FooTest extends PHPUnit\Framework\TestCase):
-     *   just including the file declares the class.
-     *
-     * - For spec-style tests (describe()/it()):
-     *   including the file immediately registers tests into Testify\TestSuite.
-     */
     private function loadTestsFromPatterns(): void
     {
         $patterns = $this->config['test_patterns'] ?? [];
@@ -94,128 +106,274 @@ final class Runner
     }
 
     /**
-     * Execute all PHPUnit\Framework\TestCase subclasses we can find.
-     * We do not rely on PHPUnit internals that changed in v11.
-     *
-     * Algorithm:
-     *  - Find all subclasses of PHPUnit\Framework\TestCase
-     *  - For each class:
-     *      * reflect public test methods (test* or #[Test])
-     *      * run them one by one (fresh instance per test)
-     *      * keep timing + status
-     *  - Print pretty summary
-     *  - Return exit code
+     * Execute all test classes with:
+     * - hook lifecycle
+     * - status classification
+     * - timing capture
+     * - summary output
      */
     private function executeAll(): int
     {
         $allClasses = $this->collectPhpUnitTestClasses();
+        $runStart   = microtime(true);
 
-        $runStart = microtime(true);
+        $filter   = $this->options['filter'];
+        $verbose  = $this->options['verbose'];
+        $useColor = $this->options['colors'];
 
-        $globalTotal  = 0;
-        $globalPassed = 0;
-        $globalFailed = 0;
+        $globalStats = [
+            'total'      => 0,
+            'passed'     => 0,
+            'failed'     => 0,
+            'skipped'    => 0,
+            'incomplete' => 0,
+            'warned'     => 0,
+        ];
 
-        // nice readable header per class
+        $suiteDurations = []; // for slowest-suite listing
+
         foreach ($allClasses as $className) {
             $methods = $this->collectTestMethods($className);
+
+            // apply --filter
+            if ($filter !== null && $filter !== '') {
+                $methods = array_values(array_filter(
+                    $methods,
+                    fn($m) => stripos($m, $filter) !== false
+                ));
+            }
+
             if (!$methods) {
                 continue;
             }
+
+            $suiteStart = microtime(true);
 
             $bar = str_repeat('─', 40);
             echo $bar . PHP_EOL;
             echo " Suite: {$className}" . PHP_EOL;
             echo $bar . PHP_EOL;
 
-            // Call optional setUpBeforeClass() once, if defined
             $this->callStaticIfExists($className, 'setUpBeforeClass');
 
             foreach ($methods as $methodName) {
-                $globalTotal++;
+                $globalStats['total']++;
 
                 $singleStart = microtime(true);
 
-                $status = 'PASS';
+                $status   = 'PASS'; // PASS|FAIL|SKIP|INCOMPLETE|WARN
                 $errorMsg = null;
 
                 try {
-                    // Fresh instance for every test method, like PHPUnit does
                     $testObj = $this->instantiateTestCase($className, $methodName);
 
-                    // setUp()
+                    // beforeEach hooks (and user setUp)
                     $this->callIfExists($testObj, 'setUp');
 
-                    // actual test
+                    // test body
                     $this->callRequired($testObj, $methodName);
 
-                    // tearDown()
+                    // afterEach hooks (and user tearDown)
                     $this->callIfExists($testObj, 'tearDown');
                 } catch (Throwable $t) {
-                    $status = 'FAIL';
+                    $status   = $this->classifyThrowable($t);
                     $errorMsg = $t->getMessage();
 
-                    // try to ensure tearDown() is still called if test body blew up
+                    // try tearDown() even on failure/skip/etc.
                     if (isset($testObj)) {
                         try {
                             $this->callIfExists($testObj, 'tearDown');
                         } catch (Throwable $ignored) {
-                            // swallow secondary teardown errors
+                            // ignore teardown secondary failure
                         }
                     }
                 }
 
-                if ($status === 'PASS') {
-                    $globalPassed++;
-                } else {
-                    $globalFailed++;
+                // global counters by status
+                switch ($status) {
+                    case 'PASS':
+                        $globalStats['passed']++;
+                        break;
+                    case 'FAIL':
+                        $globalStats['failed']++;
+                        break;
+                    case 'SKIP':
+                        $globalStats['skipped']++;
+                        break;
+                    case 'INCOMPLETE':
+                        $globalStats['incomplete']++;
+                        break;
+                    case 'WARN':
+                        $globalStats['warned']++;
+                        break;
                 }
 
-                $singleEnd = microtime(true);
+                $singleEnd  = microtime(true);
                 $durationMs = $this->fmtMs($singleStart, $singleEnd);
 
-                // Output per test
-                if ($status === 'PASS') {
-                    echo '  ' . $this->green('PASS') . '  '
-                        . $this->padRight($methodName, 30)
-                        . ' ' . $this->dim($durationMs)
-                        . PHP_EOL;
-                } else {
-                    echo '  ' . $this->red('FAIL') . '  '
-                        . $this->padRight($methodName, 30)
-                        . ' ' . $this->dim($durationMs)
-                        . PHP_EOL;
+                $label = $verbose
+                    ? "{$className}::{$methodName}"
+                    : $methodName;
 
-                    if ($errorMsg !== null && $errorMsg !== '') {
-                        echo '        ' . $this->red('↳ ') . $errorMsg . PHP_EOL;
-                    }
+                [$tagText, $tagColor] = $this->statusPresentation($status);
+
+                echo '  ' . $this->color($tagText, $tagColor, $useColor)
+                    . '  ' . $this->padRight($label, 40)
+                    . ' ' . $this->dim($durationMs, $useColor)
+                    . PHP_EOL;
+
+                if ($status !== 'PASS' && $errorMsg !== null && $errorMsg !== '') {
+                    echo '        '
+                        . $this->color('↳ ', $tagColor, $useColor)
+                        . $errorMsg
+                        . PHP_EOL;
                 }
             }
 
-            // Call optional tearDownAfterClass() once, if defined
             $this->callStaticIfExists($className, 'tearDownAfterClass');
 
-            echo PHP_EOL;
+            $suiteEnd = microtime(true);
+
+            $suiteDurations[] = [
+                'class'    => $className,
+                'duration' => $suiteEnd - $suiteStart, // seconds
+            ];
+
+            echo PHP_EOL
+                . "Suite time: "
+                . $this->dim($this->fmtMs($suiteStart, $suiteEnd), $useColor)
+                . PHP_EOL
+                . PHP_EOL;
         }
 
-        $runEnd = microtime(true);
-        $totalMs = $this->fmtMs($runStart, $runEnd);
+        $runEnd   = microtime(true);
+        $totalDur = $runEnd - $runStart; // seconds float
 
-        // Summary block
+        // Sort by duration desc and grab top 5
+        usort($suiteDurations, function ($a, $b) {
+            if ($a['duration'] === $b['duration']) {
+                return 0;
+            }
+            return ($a['duration'] < $b['duration']) ? 1 : -1;
+        });
+        $topSuites = array_slice($suiteDurations, 0, 5);
+
+        // Compute exit code (nonzero only if any FAIL)
+        $exitCode = $globalStats['failed'] > 0 ? 1 : 0;
+
+        // Render compact summary table
         echo "Summary" . PHP_EOL;
-        echo "  Total:   {$globalTotal} tests" . PHP_EOL;
-        echo "  Passed:  " . $this->green((string)$globalPassed) . PHP_EOL;
-        echo "  Failed:  " . ($globalFailed > 0 ? $this->red((string)$globalFailed) : (string)$globalFailed) . PHP_EOL;
-        echo "  Time:    " . $this->dim($totalMs) . PHP_EOL;
+        echo $this->renderSummaryTable(
+            $globalStats,
+            $totalDur,
+            $exitCode,
+            $useColor
+        ) . PHP_EOL;
 
-        $exitCode = $globalFailed > 0 ? 1 : 0;
-        echo PHP_EOL . "Exit code: " . ($exitCode === 0 ? $this->green('0') : $this->red((string)$exitCode)) . PHP_EOL;
+        // Slowest suites list under the table
+        if (count($topSuites) > 0) {
+            echo "Slowest suites:" . PHP_EOL;
+            $rank = 1;
+            foreach ($topSuites as $suiteInfo) {
+                $cls = $suiteInfo['class'];
+                $ms  = $this->msOnly($suiteInfo['duration']); // duration seconds -> ms text
+                echo "  {$rank}. "
+                    . $this->padRight($cls, 50)
+                    . ' '
+                    . $this->dim($ms, $useColor)
+                    . PHP_EOL;
+                $rank++;
+            }
+        }
 
         return $exitCode;
     }
 
     /**
-     * Find all classes in memory that extend PHPUnit\Framework\TestCase.
+     * Create and return an ASCII table string for the summary.
+     *
+     * Columns:
+     *   Total | Pass | Fail | Skipped | Incomplete | Warning | Time (ms) | ExitCode
+     *
+     * We align and draw a box for readability in CI logs.
+     */
+    private function renderSummaryTable(array $stats, float $totalDurSec, int $exitCode, bool $useColor): string
+    {
+        // Prepare row values as strings
+        $row = [
+            'Total'      => (string)$stats['total'],
+            'Pass'       => (string)$stats['passed'],
+            'Fail'       => (string)$stats['failed'],
+            'Skipped'    => (string)$stats['skipped'],
+            'Incomplete' => (string)$stats['incomplete'],
+            'Warning'    => (string)$stats['warned'],
+            'Time (ms)'  => $this->msOnly($totalDurSec),
+            'ExitCode'   => (string)$exitCode,
+        ];
+
+        // For coloring inside the table: only highlight Fail and ExitCode if non-zero,
+        // and highlight Pass if >0. We'll keep it subtle.
+        if ((int)$row['Fail'] > 0) {
+            $row['Fail'] = $this->color($row['Fail'], 'red', $useColor);
+        }
+        if ((int)$row['Pass'] > 0) {
+            $row['Pass'] = $this->color($row['Pass'], 'green', $useColor);
+        }
+        if ((int)$row['Skipped'] > 0) {
+            $row['Skipped'] = $this->color($row['Skipped'], 'yellow', $useColor);
+        }
+        if ((int)$row['Incomplete'] > 0) {
+            $row['Incomplete'] = $this->color($row['Incomplete'], 'cyan', $useColor);
+        }
+        if ((int)$row['Warning'] > 0) {
+            $row['Warning'] = $this->color($row['Warning'], 'magenta', $useColor);
+        }
+        if ($exitCode !== 0) {
+            $row['ExitCode'] = $this->color($row['ExitCode'], 'red', $useColor);
+        } else {
+            $row['ExitCode'] = $this->color($row['ExitCode'], 'green', $useColor);
+        }
+
+        $headers = array_keys($row);
+        $values  = array_values($row);
+
+        // Compute column widths (max of header vs value)
+        $widths = [];
+        foreach ($headers as $i => $hdr) {
+            // strip ANSI when measuring lengths for box padding
+            $valPlain = $this->stripAnsi($values[$i]);
+            $w = max(mb_strlen($hdr, 'UTF-8'), mb_strlen($valPlain, 'UTF-8'));
+            $widths[$i] = $w;
+        }
+
+        // Build lines
+        $top = '┌';
+        $mid = '├';
+        $bot = '└';
+        $headerLine = '│';
+        $valueLine  = '│';
+
+        foreach ($headers as $i => $hdr) {
+            $w = $widths[$i];
+            $top      .= str_repeat('─', $w + 2) . ($i === count($headers) - 1 ? '┐' : '┬');
+            $mid      .= str_repeat('─', $w + 2) . ($i === count($headers) - 1 ? '┤' : '┼');
+            $bot      .= str_repeat('─', $w + 2) . ($i === count($headers) - 1 ? '┘' : '┴');
+
+            $headerLine .= ' ' . $this->padBoth($hdr, $w) . ' │';
+            $valueLine  .= ' ' . $this->padBoth($values[$i], $w, $values[$i]) . ' │';
+        }
+
+        return implode(PHP_EOL, [
+            $top,
+            $headerLine,
+            $mid,
+            $valueLine,
+            $bot,
+        ]);
+    }
+
+    /**
+     * Gather all subclasses of PHPUnit\Framework\TestCase that were loaded.
      *
      * @return array<int, class-string<PhpUnitTestCase>>
      */
@@ -229,19 +387,15 @@ final class Runner
             }
         }
 
-        // unique & stable order
         $out = array_values(array_unique($out));
-
         sort($out);
 
         return $out;
     }
 
     /**
-     * Return the list of public test methods for a given PHPUnit test class.
-     * We treat:
-     *   - methods starting with "test"
-     *   - OR methods tagged with #[PHPUnit\Framework\Attributes\Test]
+     * Find test methods in this PHPUnit test class.
+     * We consider "test*" or #[PHPUnit\Framework\Attributes\Test]
      *
      * @param class-string<PhpUnitTestCase> $className
      * @return array<int,string>
@@ -253,7 +407,6 @@ final class Runner
 
         foreach ($rc->getMethods(ReflectionMethod::IS_PUBLIC) as $m) {
             if ($m->getDeclaringClass()->getName() !== $className) {
-                // skip inherited methods from PHPUnit base unless re-declared
                 continue;
             }
 
@@ -263,7 +416,6 @@ final class Runner
 
             $isAttributeStyle = false;
             foreach ($m->getAttributes() as $attr) {
-                // PHPUnit 10/11 attribute
                 if ($attr->getName() === 'PHPUnit\\Framework\\Attributes\\Test') {
                     $isAttributeStyle = true;
                     break;
@@ -276,29 +428,23 @@ final class Runner
         }
 
         sort($methods);
-
         return $methods;
     }
 
     /**
-     * Create a new instance of a PHPUnit test case for the given method.
-     * PHPUnit's TestCase historically accepts the test method name in the constructor.
-     *
-     * If that signature ever changes in PHPUnit 11.x, we'll try fallback no-arg.
+     * Instantiate a PHPUnit test case for a given method.
      */
     private function instantiateTestCase(string $className, string $methodName): object
     {
         try {
             return new $className($methodName);
         } catch (Throwable $e) {
-            // fallback: maybe no-arg constructor in newer PHPUnit.
             return new $className();
         }
     }
 
     /**
-     * Call $object->$method() if it exists (protected or public).
-     * This lets us call setUp()/tearDown() even if they're protected.
+     * call setUp() / tearDown() if present (protected or public)
      */
     private function callIfExists(object $obj, string $method): void
     {
@@ -308,15 +454,11 @@ final class Runner
 
         $rm = new ReflectionMethod($obj, $method);
         $rm->setAccessible(true);
-
-        // run and translate assertion failures into exceptions (they already are),
-        // let them bubble so outer try/catch records FAIL.
         $rm->invoke($obj);
     }
 
     /**
-     * Call static $className::$method() if it exists.
-     * Used for setUpBeforeClass / tearDownAfterClass.
+     * call setUpBeforeClass() / tearDownAfterClass() if present (static)
      */
     private function callStaticIfExists(string $className, string $method): void
     {
@@ -330,9 +472,7 @@ final class Runner
     }
 
     /**
-     * Call a REQUIRED public/protected test method itself.
-     * If assertion fails, PHPUnit will typically throw ExpectationFailedException
-     * (extends AssertionFailedError). We just let it bubble.
+     * Call actual test method.
      */
     private function callRequired(object $obj, string $method): void
     {
@@ -342,50 +482,159 @@ final class Runner
     }
 
     /**
-     * formatting helpers (colors + timing)
+     * Classify Throwable into FAIL / SKIP / INCOMPLETE / WARN.
      */
+    private function classifyThrowable(Throwable $t): string
+    {
+        // helper closures for class detection
+        $isAny = function (Throwable $th, array $candidates): bool {
+            foreach ($candidates as $fqcn) {
+                if (class_exists($fqcn) || interface_exists($fqcn)) {
+                    if ($th instanceof $fqcn) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
 
+        // SKIP
+        if ($isAny($t, [
+            'PHPUnit\\Framework\\SkippedTest',
+            'PHPUnit\\Framework\\SkippedTestError',
+        ])) {
+            return 'SKIP';
+        }
+
+        // INCOMPLETE
+        if ($isAny($t, [
+            'PHPUnit\\Framework\\IncompleteTest',
+            'PHPUnit\\Framework\\IncompleteTestError',
+        ])) {
+            return 'INCOMPLETE';
+        }
+
+        // WARN (risky/warning)
+        if ($isAny($t, [
+            'PHPUnit\\Framework\\RiskyTest',
+            'PHPUnit\\Framework\\RiskyTestError',
+            'PHPUnit\\Framework\\Warning',
+        ])) {
+            return 'WARN';
+        }
+
+        // FAIL (assertion-style)
+        if ($isAny($t, [
+            'PHPUnit\\Framework\\AssertionFailedError',
+            'PHPUnit\\Framework\\ExpectationFailedException',
+        ])) {
+            return 'FAIL';
+        }
+
+        // default: treat anything else as FAIL
+        return 'FAIL';
+    }
+
+    /**
+     * Map status to [label, colorKey].
+     */
+    private function statusPresentation(string $status): array
+    {
+        return match ($status) {
+            'PASS'       => ['PASS', 'green'],
+            'FAIL'       => ['FAIL', 'red'],
+            'SKIP'       => ['SKIP', 'yellow'],
+            'INCOMPLETE' => ['INC ', 'cyan'],
+            'WARN'       => ['WARN', 'magenta'],
+            default      => [$status, 'red'],
+        };
+    }
+
+    /**
+     * ms formatting helpers
+     */
     private function fmtMs(float $start, float $end): string
     {
         $ms = ($end - $start) * 1000.0;
         return number_format($ms, 2) . 'ms';
     }
 
-    private function green(string $text): string
+    private function msOnly(float $sec): string
     {
-        return $this->supportsColor() ? "\033[0;32m{$text}\033[0m" : $text;
+        $ms = $sec * 1000.0;
+        return number_format($ms, 2) . 'ms';
     }
 
-    private function red(string $text): string
+    /**
+     * For top suites we stored duration in seconds already,
+     * so we can convert by calling msOnly().
+     */
+    private function fmtMsFloat(float $startSec, float $endSec): string
     {
-        return $this->supportsColor() ? "\033[0;31m{$text}\033[0m" : $text;
+        $ms = ($endSec - $startSec) * 1000.0;
+        return number_format($ms, 2) . 'ms';
     }
 
-    private function dim(string $text): string
+    private function color(string $text, string $kind, bool $useColor): string
     {
-        return $this->supportsColor() ? "\033[2m{$text}\033[0m" : $text;
+        if (!$useColor) {
+            return $text;
+        }
+
+        $code = match ($kind) {
+            'green'   => '0;32',
+            'red'     => '0;31',
+            'yellow'  => '0;33',
+            'cyan'    => '0;36',
+            'magenta' => '0;35',
+            'dim'     => '2',
+            default   => '0',
+        };
+
+        return "\033[{$code}m{$text}\033[0m";
+    }
+
+    private function dim(string $text, bool $useColor): string
+    {
+        return $useColor
+            ? "\033[2m{$text}\033[0m"
+            : $text;
     }
 
     private function padRight(string $text, int $width): string
     {
-        $len = mb_strlen($text, 'UTF-8');
+        $len = mb_strlen($this->stripAnsi($text), 'UTF-8');
         if ($len >= $width) {
             return $text;
         }
         return $text . str_repeat(' ', $width - $len);
     }
 
-    private function supportsColor(): bool
+    /**
+     * Center-ish pad for table cells.
+     * If the content has ANSI codes, measure plain, but return colored.
+     */
+    private function padBoth(string $text, int $width, ?string $rawForLen = null): string
     {
-        // simple heuristic for Windows Terminal / ANSI support
-        if (DIRECTORY_SEPARATOR === '\\') {
-            // modern Windows terminals support ANSI escapes,
-            // but if you want to be super safe, you could make this configurable.
-            return true;
+        $plain = $this->stripAnsi($rawForLen ?? $text);
+        $len   = mb_strlen($plain, 'UTF-8');
+        if ($len >= $width) {
+            return $text;
         }
 
-        return function_exists('posix_isatty')
-            ? @posix_isatty(STDOUT) === true
-            : true;
+        $totalPad = $width - $len;
+        $left  = intdiv($totalPad, 2);
+        $right = $totalPad - $left;
+
+        return str_repeat(' ', $left) . $text . str_repeat(' ', $right);
+    }
+
+    /**
+     * Remove ANSI escape sequences so we can compute string widths correctly.
+     */
+    private function stripAnsi(string $text): string
+    {
+        // match ESC[...]m
+        return preg_replace('/\x1B\[[0-9;]*m/', '', $text) ?? $text;
     }
 }

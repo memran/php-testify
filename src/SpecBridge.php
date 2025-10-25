@@ -7,25 +7,27 @@ use RuntimeException;
 use ReflectionClass;
 
 /**
- * SpecBridge turns php-testify specs into real PHPUnit TestCase classes.
+ * SpecBridge converts Testify's describe()/it() suites
+ * into runtime-generated PHPUnit test classes.
  *
- * After calling materializeSpecClasses():
- * - For every describe() block, we have a generated class like:
- *   Testify\Generated\Math_basics_0_TestifySpec extends PHPUnit\Framework\TestCase
+ * Each describe() block becomes:
+ *   final class Testify\Generated\<SuiteName>_<N>_TestifySpec extends PHPUnit\Framework\TestCase
  *
- * - For every it() inside that describe(), we generate a method:
- *   public function test_adds_numbers_correctly() { ... }
+ * That generated class now also wires hooks:
+ *   - beforeAll()   -> static setUpBeforeClass()
+ *   - afterAll()    -> static tearDownAfterClass()
+ *   - beforeEach()  -> setUp()
+ *   - afterEach()   -> tearDown()
  *
- * - The method calls the original closure you wrote in it().
- *
- * This means PHPUnit can discover/run them like any other PHPUnit test.
+ * And each it() becomes a public test_*() method.
  */
 final class SpecBridge
 {
     /**
-     * Generate PHPUnit-compatible classes for all specs.
+     * Generate PHPUnit-compatible classes for all suites.
      *
-     * @return array<int, class-string>  List of FQCNs that were created.
+     * @return array<int, class-string> FQCNs created (not currently used by Runner directly,
+     *                                   but good to keep return signature for possible future logic)
      */
     public function materializeSpecClasses(): array
     {
@@ -35,24 +37,53 @@ final class SpecBridge
         foreach ($suites as $suiteIndex => $suite) {
             $fqcn = $this->makeClassName($suite['name'], $suiteIndex);
 
-            $code = $this->generatePhpUnitClassCode($fqcn, $suite['tests']);
-            $ok   = eval($code);
+            $code = $this->generatePhpUnitClassCode(
+                $fqcn,
+                $suite['tests'],
+                $suite['beforeAll'],
+                $suite['afterAll'],
+                $suite['beforeEach'],
+                $suite['afterEach'],
+            );
+
+            $ok = eval($code);
             if ($ok === false) {
                 throw new RuntimeException(
                     "Failed to eval generated test class for suite '{$suite['name']}'"
                 );
             }
 
-            // Inject the closures into the generated class static property.
-            $closures = [];
+            // Inject closures for tests & hooks into the generated class
+            $testClosures      = [];
             foreach ($suite['tests'] as $t) {
-                $closures[] = $t['fn']; // original callable from it()
+                $testClosures[] = $t['fn'];
             }
 
+            $beforeAllClosures   = $suite['beforeAll'];
+            $afterAllClosures    = $suite['afterAll'];
+            $beforeEachClosures  = $suite['beforeEach'];
+            $afterEachClosures   = $suite['afterEach'];
+
             $refClass = new ReflectionClass($fqcn);
-            $prop     = $refClass->getProperty('__specClosures');
+
+            // set __specClosures
+            $prop = $refClass->getProperty('__specClosures');
             $prop->setAccessible(true);
-            $prop->setValue(null, $closures);
+            $prop->setValue(null, $testClosures);
+
+            // set hook arrays
+            $map = [
+                '__beforeAll'  => $beforeAllClosures,
+                '__afterAll'   => $afterAllClosures,
+                '__beforeEach' => $beforeEachClosures,
+                '__afterEach'  => $afterEachClosures,
+            ];
+
+            foreach ($map as $propName => $value) {
+                $p = $refClass->getProperty($propName);
+                $p->setAccessible(true);
+                $p->setValue(null, $value);
+            }
 
             $createdClasses[] = $fqcn;
         }
@@ -61,8 +92,7 @@ final class SpecBridge
     }
 
     /**
-     * Build a deterministic FQCN for a describe() block:
-     * e.g. "Testify\Generated\Math_basics_0_TestifySpec"
+     * Make FQCN for a generated suite class.
      */
     private function makeClassName(string $suiteName, int $index): string
     {
@@ -70,7 +100,6 @@ final class SpecBridge
         if ($base === '' || $base === null) {
             $base = 'Suite';
         }
-
         if (!preg_match('/^[A-Za-z_]/', $base)) {
             $base = 'T_' . $base;
         }
@@ -79,27 +108,43 @@ final class SpecBridge
     }
 
     /**
-     * Create the PHP class code (string) for the proxy PHPUnit test class.
+     * Create the PHP code string for the generated PHPUnit test class.
      *
      * @param string $fqcn
      * @param array<int, array{name:string, fn:callable}> $tests
+     * @param list<callable> $beforeAll
+     * @param list<callable> $afterAll
+     * @param list<callable> $beforeEach
+     * @param list<callable> $afterEach
      */
-    private function generatePhpUnitClassCode(string $fqcn, array $tests): string
-    {
+    private function generatePhpUnitClassCode(
+        string $fqcn,
+        array $tests,
+        array $beforeAll,
+        array $afterAll,
+        array $beforeEach,
+        array $afterEach,
+    ): string {
         $lastSep   = strrpos($fqcn, '\\');
         $ns        = substr($fqcn, 0, $lastSep);
         $shortName = substr($fqcn, $lastSep + 1);
 
-        $methodsCode = [];
+        // build method bodies for each `it()`
+        $methodBlocks = [];
         foreach ($tests as $i => $test) {
-            $methodName = $this->makeMethodName($test['name'], $i);
-            $methodsCode[] = $this->generateMethodCode($methodName, $i);
+            $methodName   = $this->makeMethodName($test['name'], $i);
+            $methodBlocks[] = $this->generateMethodCode($methodName, $i);
         }
 
-        // We'll fill $__specClosures after eval() using reflection.
-        $closuresArrayInit = $this->generatePlaceholders(count($tests));
+        $methodsJoined = implode("\n", $methodBlocks);
 
-        $methodsJoined = implode("\n", $methodsCode);
+        // We can't inline closures in code; we fill them after eval().
+        // So here we preload them as null.
+        $testClosuresInit      = $this->nullArray(count($tests));
+        $beforeAllClosuresInit = $this->nullArray(count($beforeAll));
+        $afterAllClosuresInit  = $this->nullArray(count($afterAll));
+        $beforeEachInit        = $this->nullArray(count($beforeEach));
+        $afterEachInit         = $this->nullArray(count($afterEach));
 
         $code = <<<PHP
         namespace {$ns};
@@ -108,20 +153,88 @@ final class SpecBridge
         use Testify\\TestFailureException;
 
         /**
-         * Auto-generated by php-testify SpecBridge.
-         * DO NOT EDIT. This class maps describe()/it() specs to PHPUnit tests.
+         * AUTO-GENERATED by php-testify SpecBridge.
+         * DO NOT EDIT.
+         *
+         * Hooks mapping:
+         *   beforeAll()   -> setUpBeforeClass()
+         *   afterAll()    -> tearDownAfterClass()
+         *   beforeEach()  -> setUp()
+         *   afterEach()   -> tearDown()
          */
         final class {$shortName} extends PhpUnitTestCase
         {
             /**
              * @var array<int, callable>
              */
-            private static array \$__specClosures = {$closuresArrayInit};
+            private static array \$__specClosures = {$testClosuresInit};
 
             /**
-             * Fetch the test closure by index.
-             *
-             * @throws \\RuntimeException if missing
+             * @var array<int, callable>
+             */
+            private static array \$__beforeAll = {$beforeAllClosuresInit};
+
+            /**
+             * @var array<int, callable>
+             */
+            private static array \$__afterAll = {$afterAllClosuresInit};
+
+            /**
+             * @var array<int, callable>
+             */
+            private static array \$__beforeEach = {$beforeEachInit};
+
+            /**
+             * @var array<int, callable>
+             */
+            private static array \$__afterEach = {$afterEachInit};
+
+            /**
+             * PHPUnit will call this before any test methods in this class
+             * (in our Runner we do callStaticIfExists(..., 'setUpBeforeClass')).
+             */
+            public static function setUpBeforeClass(): void
+            {
+                foreach (self::\$__beforeAll as \$fn) {
+                    \$fn();
+                }
+            }
+
+            /**
+             * PHPUnit will call this after all test methods in this class
+             * (in our Runner we do callStaticIfExists(..., 'tearDownAfterClass')).
+             */
+            public static function tearDownAfterClass(): void
+            {
+                foreach (self::\$__afterAll as \$fn) {
+                    \$fn();
+                }
+            }
+
+            /**
+             * PHPUnit calls setUp() before EACH test method.
+             * Our Runner also explicitly calls setUp() on each test instance.
+             */
+            protected function setUp(): void
+            {
+                foreach (self::\$__beforeEach as \$fn) {
+                    \$fn();
+                }
+            }
+
+            /**
+             * PHPUnit calls tearDown() after EACH test method.
+             * Our Runner also calls tearDown() explicitly.
+             */
+            protected function tearDown(): void
+            {
+                foreach (self::\$__afterEach as \$fn) {
+                    \$fn();
+                }
+            }
+
+            /**
+             * Pull a specific it() closure from the static registry.
              */
             public static function getSpecClosure(int \$index): callable
             {
@@ -155,9 +268,7 @@ final class SpecBridge
     }
 
     /**
-     * Emit the actual PHPUnit test method body.
-     *
-     * Each method pulls the closure by index and executes it.
+     * Each test method body just calls its matching closure.
      */
     private function generateMethodCode(string $methodName, int $idx): string
     {
@@ -169,8 +280,6 @@ final class SpecBridge
             public function {$methodName}(): void
             {
                 \$fn = self::getSpecClosure({$idx});
-                // If the closure throws TestFailureException,
-                // PHPUnit will record this as a failed assertion.
                 \$fn();
             }
 
@@ -178,14 +287,13 @@ final class SpecBridge
     }
 
     /**
-     * We cannot embed closures directly in code,
-     * so we initialize with nulls and patch after eval().
+     * Utility: create "[null, null, null]" for N entries.
      */
-    private function generatePlaceholders(int $howMany): string
+    private function nullArray(int $count): string
     {
-        if ($howMany <= 0) {
+        if ($count <= 0) {
             return '[]';
         }
-        return '[' . implode(', ', array_fill(0, $howMany, 'null')) . ']';
+        return '[' . implode(', ', array_fill(0, $count, 'null')) . ']';
     }
 }

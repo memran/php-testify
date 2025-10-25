@@ -4,23 +4,84 @@
 require __DIR__ . '/../vendor/autoload.php';
 
 use Testify\Runner;
+use Testify\Watcher;
+
+/**
+ * Supported CLI flags:
+ *   --filter <pattern>
+ *   --no-colors
+ *   --verbose
+ *   --watch
+ */
 
 $configFile = __DIR__ . '/../phpunit.config.php';
 
-$runner = new Runner($configFile);
+$args = $argv;
+array_shift($args); // remove script name
 
-try {
-    $runner->run();
-    exit(0);
-} catch (Throwable $e) {
-    // NOTE:
-    // Our Printer already printed per-test failures.
-    // This is just a final line + proper exit code for CI.
-    $code = $e->getCode();
-    if (!is_int($code) || $code === 0) {
-        $code = 1;
+$options = [
+    'filter'    => null,
+    'colors'    => true,
+    'verbose'   => false,
+    'watch'     => false,
+];
+
+// crude parse
+for ($i = 0; $i < count($args); $i++) {
+    $arg = $args[$i];
+
+    if ($arg === '--no-colors') {
+        $options['colors'] = false;
+        continue;
     }
 
-    fwrite(STDERR, "[php-testify] " . $e->getMessage() . PHP_EOL);
-    exit($code);
+    if ($arg === '--verbose') {
+        $options['verbose'] = true;
+        continue;
+    }
+
+    if ($arg === '--watch') {
+        $options['watch'] = true;
+        continue;
+    }
+
+    if ($arg === '--filter') {
+        $next = $args[$i + 1] ?? null;
+        if ($next === null) {
+            fwrite(STDERR, "[php-testify] --filter requires a value\n");
+            exit(1);
+        }
+        $options['filter'] = $next;
+        $i++;
+        continue;
+    }
+
+    fwrite(STDERR, "[php-testify] Unknown option: {$arg}\n");
+    exit(1);
 }
+
+if ($options['watch'] === true) {
+    // Launch watch mode. Watcher will spawn fresh php processes for each run.
+    $watcher = new Watcher(
+        $configFile,
+        [
+            'filter'  => $options['filter'],
+            'colors'  => $options['colors'],
+            'verbose' => $options['verbose'],
+        ]
+    );
+
+    $watcher->watchLoop();
+    // watchLoop() is long-running; when it eventually returns we exit 0.
+    exit(0);
+}
+
+// Non-watch mode: run tests once now
+$runner = new Runner($configFile, [
+    'filter'  => $options['filter'],
+    'colors'  => $options['colors'],
+    'verbose' => $options['verbose'],
+]);
+
+$exitCode = $runner->run();
+exit($exitCode);

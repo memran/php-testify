@@ -5,10 +5,23 @@ namespace Testify;
 final class TestSuite
 {
     /**
-     * @var array<int, array{
-     *   name: string,
-     *   tests: array<int, array{name:string, fn:callable}>
-     * }>
+     * Structure of $suites:
+     *
+     * [
+     *   [
+     *     'name'        => string,
+     *     'tests'       => [ ['name' => string, 'fn' => callable], ... ],
+     *     'beforeAll'   => list<callable>,
+     *     'afterAll'    => list<callable>,
+     *     'beforeEach'  => list<callable>,
+     *     'afterEach'   => list<callable>,
+     *   ],
+     *   ...
+     * ]
+     *
+     * Notes:
+     * - We collect hook callables as they are registered
+     *   so SpecBridge can generate methods that execute them.
      */
     private array $suites = [];
 
@@ -25,27 +38,25 @@ final class TestSuite
     }
 
     /**
-     * Register a new "describe" block.
-     *
-     * @param string   $name
-     * @param callable $callback The body of the describe() block.
+     * Add a new describe() block.
      */
     public function addSuite(string $name, callable $callback): void
     {
         $this->suites[] = [
-            'name' => $name,
-            'tests' => [],
+            'name'        => $name,
+            'tests'       => [],
+            'beforeAll'   => [],
+            'afterAll'    => [],
+            'beforeEach'  => [],
+            'afterEach'   => [],
         ];
 
-        // Execute the body so it() calls inside can register tests.
+        // Run the body so that it()/beforeEach() etc. get registered
         $callback();
     }
 
     /**
-     * Register a test ("it") into the most recent describe() block.
-     *
-     * @param string   $name
-     * @param callable $fn
+     * Add an it() test to the most recent suite.
      */
     public function addTest(string $name, callable $fn): void
     {
@@ -63,11 +74,53 @@ final class TestSuite
     }
 
     /**
-     * Return all collected suites/specs.
+     * Register hook callables to the active suite.
+     */
+    public function addBeforeAll(callable $fn): void
+    {
+        $this->requireActiveSuite()['beforeAll'][] = $fn;
+    }
+
+    public function addAfterAll(callable $fn): void
+    {
+        $this->requireActiveSuite()['afterAll'][] = $fn;
+    }
+
+    public function addBeforeEach(callable $fn): void
+    {
+        $this->requireActiveSuite()['beforeEach'][] = $fn;
+    }
+
+    public function addAfterEach(callable $fn): void
+    {
+        $this->requireActiveSuite()['afterEach'][] = $fn;
+    }
+
+    /**
+     * Helper for hook setters.
+     */
+    private function &requireActiveSuite(): array
+    {
+        $idx = \count($this->suites) - 1;
+        if ($idx < 0) {
+            throw new \RuntimeException(
+                "No active describe() while registering a hook. Did you call beforeEach() outside describe()?"
+            );
+        }
+
+        return $this->suites[$idx];
+    }
+
+    /**
+     * Get all suites.
      *
      * @return array<int, array{
      *   name: string,
-     *   tests: array<int, array{name:string, fn:callable}>
+     *   tests: array<int, array{name:string, fn:callable}>,
+     *   beforeAll: list<callable>,
+     *   afterAll: list<callable>,
+     *   beforeEach: list<callable>,
+     *   afterEach: list<callable>,
      * }>
      */
     public function all(): array
