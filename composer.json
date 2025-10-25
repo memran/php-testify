@@ -29,6 +29,9 @@
       "src/testify.php"
     ]
   },
+  "bin": [
+    "bin/testify"
+  ],
   "autoload-dev": {
     "psr-4": {
       "Tests\\": "tests/"
