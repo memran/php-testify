@@ -1,0 +1,59 @@
+# Dependency directories
+/vendor/
+/composer.lock
+
+# IDE and editor files
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+*.cache
+
+# Test reports
+/reports/
+/coverage/
+clover.xml
+coverage.xml
+
+# Local configuration
+.env
+.env.local
+.env.*.local
+
+# Composer files (except json)
+composer.phar
+
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+*.tmp
+*.temp
+
+# Package files
+*.phar
+
+# Build artifacts
+/build/
+/phar/
+
+# Local development
+.phpunit.result.cache
