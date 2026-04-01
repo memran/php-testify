@@ -4,24 +4,27 @@ declare(strict_types=1);
 
 namespace Testify;
 
+use PHPUnit\Framework\IncompleteTestError;
+use PHPUnit\Framework\SkippedWithMessageException;
+
 if (!\function_exists('Testify\\describe')) {
-    function describe(string $name, callable $callback): void
+    function describe(string $name, callable $callback): FluentSuiteHandle
     {
-        TestSuite::getInstance()->addSuite($name, $callback);
+        return TestSuite::getInstance()->addSuite($name, $callback);
     }
 }
 
 if (!\function_exists('Testify\\it')) {
-    function it(string $name, callable $fn): void
+    function it(string $name, callable $fn): FluentTestHandle
     {
-        TestSuite::getInstance()->addTest($name, $fn);
+        return TestSuite::getInstance()->addTest($name, $fn);
     }
 }
 
 if (!\function_exists('Testify\\test')) {
-    function test(string $name, callable $fn): void
+    function test(string $name, callable $fn): FluentTestHandle
     {
-        TestSuite::getInstance()->addTest($name, $fn);
+        return TestSuite::getInstance()->addTest($name, $fn);
     }
 }
 
@@ -109,5 +112,40 @@ if (!\function_exists('Testify\\afterEach')) {
     function afterEach(callable $fn): void
     {
         TestSuite::getInstance()->addAfterEach($fn);
+    }
+}
+
+if (!\function_exists('Testify\\group')) {
+    function group(string ...$groups): void
+    {
+        TestSuite::getInstance()->addCurrentSuiteGroups(array_values($groups));
+    }
+}
+
+if (!\function_exists('Testify\\tag')) {
+    function tag(string ...$groups): void
+    {
+        group(...$groups);
+    }
+}
+
+if (!\function_exists('Testify\\skip')) {
+    function skip(string $reason = 'Skipped'): never
+    {
+        throw new SkippedWithMessageException($reason);
+    }
+}
+
+if (!\function_exists('Testify\\incomplete')) {
+    function incomplete(string $reason = 'Incomplete'): never
+    {
+        throw new IncompleteTestError($reason);
+    }
+}
+
+if (!\function_exists('Testify\\todo')) {
+    function todo(string $reason = 'Todo'): never
+    {
+        incomplete($reason);
     }
 }

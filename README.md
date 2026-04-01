@@ -11,9 +11,12 @@ PHP-Testify brings an expressive `expect()` API, `describe()` / `it()` specs, a 
 ## Features
 
 - Fluent assertions such as `toBe()`, `toEqual()`, `toContain()`, `toThrow()`, and negation with `not()`
+- Parameterized specs with `->with([...])`
+- Fluent skip/incomplete controls with `->skip()`, `incomplete()`, and `todo()`
+- Fluent groups/tags with `->group()` / `group()` plus CLI filtering
 - Two test styles in the same project: PHPUnit classes and Jest/Vitest-like specs
-- Built-in lifecycle hooks: `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
-- Filtered runs, verbose output, and watch mode from the `bin/testify` CLI
+- Built-in lifecycle hooks with nested-suite inheritance: `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
+- Filtered runs, grouped runs, verbose output, and watch mode from the `bin/testify` CLI
 - Static analysis, formatting, and CI setup ready for package contributors
 
 ## Requirements
@@ -68,6 +71,27 @@ Run it:
 
 ```bash
 php bin/testify
+```
+
+Parameterized and grouped specs:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use function Testify\describe;
+use function Testify\expect;
+use function Testify\it;
+
+describe('cart totals', function (): void {
+    it('adds line items', function (array $items, int $expected): void {
+        expect(array_sum($items))->toBe($expected);
+    })->with([
+        'two items' => [[12, 8], 20],
+        'three items' => [[12, 8, 5], 25],
+    ])->group('cart', 'fast');
+})->group('unit');
 ```
 
 ## Tutorials
@@ -142,11 +166,39 @@ describe('invoice presentation', function (): void {
 
 ```bash
 php bin/testify --filter invoice
+php bin/testify --group api
+php bin/testify --group api --exclude-group slow
 php bin/testify --verbose
 php bin/testify --watch
 ```
 
-Use `--filter` to run only matching PHPUnit methods or spec names. Use `--watch` during local development to re-run the suite after file changes without shell interpolation.
+Use `--filter` to run matching PHPUnit methods, spec names, suite names, or dataset labels. Use `--group` and `--exclude-group` to select fluent tests by tags. Use `--watch` during local development to re-run the suite after file changes without shell interpolation.
+
+### 4. Skip or mark work incomplete
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use function Testify\describe;
+use function Testify\incomplete;
+use function Testify\it;
+use function Testify\skip;
+
+describe('feature rollout', function (): void {
+    it('ships later', function (): void {
+    })->skip('waiting for backend support');
+
+    it('needs more implementation', function (): void {
+        incomplete('validation rules still missing');
+    });
+
+    it('is planned work', function (): void {
+        todo('queued for next sprint');
+    });
+});
+```
 
 ## Assertion Examples
 
@@ -155,8 +207,18 @@ expect($value)->toBe('exact');
 expect($value)->toEqual(['loose' => 'match']);
 expect($value)->toBeTruthy();
 expect($value)->toBeGreaterThan(10);
+expect($value)->toBeGreaterThanOrEqual(10);
 expect($array)->toContain('item');
+expect($array)->toHaveCount(3);
+expect($array)->toHaveKey('name');
+expect($array)->toHaveKeyWithValue('role', 'admin');
+expect('php-testify')->toStartWith('php');
+expect('php-testify')->toEndWith('fy');
+expect('php-testify')->toMatch('/test/i');
+expect(3.14159)->toBeCloseTo(3.14, 0.01);
 expect($callable)->toThrow(RuntimeException::class);
+expect($callable)->toThrowWithMessage(RuntimeException::class, 'boom');
+expect($callable)->toThrowWithCode(RuntimeException::class, 42);
 expect($object)->toBeInstanceOf(User::class);
 expect($object)->not()->toBeSameObject($otherObject);
 ```
@@ -199,6 +261,24 @@ composer ci
 - Watch mode spawns child processes with argument arrays, not shell-built command strings.
 - The runner validates `bootstrap` and `test_patterns` before loading files.
 - Keep `phpunit.config.php` under version control and point it only at trusted bootstrap files.
+- Fluent groups/tags currently apply to Testify specs, not native PHPUnit `#[Group]` attributes.
+
+## Supported Today
+
+- `describe()` / `it()` / `test()` specs
+- nested suites with inherited `beforeEach` / `afterEach` hooks
+- datasets with `->with([...])`
+- fluent groups/tags with CLI selection
+- skip/incomplete states through metadata or runtime helpers
+- mixed projects that contain both PHPUnit test classes and Testify specs
+- expanded day-to-day matchers in `expect()`
+
+## Current Limits
+
+- PHPUnit attributes such as `#[DataProvider]`, `#[Depends]`, and `#[Group]` are not re-exposed through the Testify runner yet
+- fluent datasets are inline per test; reusable named dataset registries are not implemented
+- there is no XML bridge for `phpunit.xml` or `phpunit.xml.dist`; `phpunit.config.php` remains the runtime config source
+- machine-readable reporters and advanced PHPUnit extension/event integration are still missing
 
 ## Contributing
 

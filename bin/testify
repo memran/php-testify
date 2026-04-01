@@ -51,10 +51,42 @@ $options = [
     'colors'  => true,
     'verbose' => false,
     'watch'   => false,
+    'groups' => [],
+    'excludeGroups' => [],
 ];
+
+$printHelp = static function (): void {
+    echo <<<TEXT
+php-testify
+
+Usage:
+  php bin/testify [options]
+
+Options:
+  --filter <value>         Run tests whose suite, test, or dataset name matches
+  --group <name>           Include only fluent tests with this group/tag
+  --exclude-group <name>   Exclude fluent tests with this group/tag
+  --verbose                Show suite-qualified test labels
+  --no-colors              Disable ANSI colors
+  --watch                  Re-run tests on file changes
+  --help                   Show this help text
+  --version                Show the package version
+
+TEXT;
+};
 
 for ($i = 0; $i < count($args); $i++) {
     $arg = $args[$i];
+
+    if ($arg === '--help' || $arg === '-h') {
+        $printHelp();
+        exit(0);
+    }
+
+    if ($arg === '--version' || $arg === '-V') {
+        echo "php-testify dev\n";
+        exit(0);
+    }
 
     if ($arg === '--no-colors') {
         $options['colors'] = false;
@@ -82,6 +114,28 @@ for ($i = 0; $i < count($args); $i++) {
         continue;
     }
 
+    if ($arg === '--group') {
+        $next = $args[$i + 1] ?? null;
+        if ($next === null) {
+            fwrite(STDERR, "[php-testify] --group requires a value\n");
+            exit(1);
+        }
+        $options['groups'][] = $next;
+        $i++;
+        continue;
+    }
+
+    if ($arg === '--exclude-group') {
+        $next = $args[$i + 1] ?? null;
+        if ($next === null) {
+            fwrite(STDERR, "[php-testify] --exclude-group requires a value\n");
+            exit(1);
+        }
+        $options['excludeGroups'][] = $next;
+        $i++;
+        continue;
+    }
+
     fwrite(STDERR, "[php-testify] Unknown option: {$arg}\n");
     exit(1);
 }
@@ -94,6 +148,8 @@ if ($options['watch'] === true) {
             'filter'  => $options['filter'],
             'colors'  => $options['colors'],
             'verbose' => $options['verbose'],
+            'groups' => $options['groups'],
+            'excludeGroups' => $options['excludeGroups'],
         ]
     );
 
@@ -108,6 +164,8 @@ $runner = new Runner(
         'filter'  => $options['filter'],
         'colors'  => $options['colors'],
         'verbose' => $options['verbose'],
+        'groups' => $options['groups'],
+        'excludeGroups' => $options['excludeGroups'],
     ]
 );
 

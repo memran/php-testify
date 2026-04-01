@@ -31,14 +31,13 @@ Notes:
 - `[x]` `beforeEach()`
 - `[x]` `afterEach()`
 - `[x]` Prevents hooks from being declared outside `describe()`
-- `[-]` Nested `describe()` semantics
-Current behavior: nested suites register and run, but there is no full hierarchical suite model with inherited hooks and metadata.
-- `[ ]` Per-test metadata in the fluent API
-- `[ ]` Per-suite metadata in the fluent API
-- `[ ]` Skip controls in the fluent API
-- `[ ]` Incomplete/todo controls in the fluent API
-- `[ ]` Group/tag controls in the fluent API
-- `[ ]` Dataset/parameterization controls in the fluent API
+- `[x]` Nested `describe()` semantics
+- `[x]` Per-test metadata in the fluent API
+- `[x]` Per-suite metadata in the fluent API
+- `[x]` Skip controls in the fluent API
+- `[x]` Incomplete/todo controls in the fluent API
+- `[x]` Group/tag controls in the fluent API
+- `[x]` Dataset/parameterization controls in the fluent API
 
 ## 2. Fluent Assertion API
 
@@ -62,15 +61,15 @@ Current behavior: nested suites register and run, but there is no full hierarchi
 - `[x]` Negation with `not()`
 - `[-]` Cohesive matcher architecture
 Current behavior: assertions work, but the API is still a growing list of methods rather than a well-organized matcher system.
-- `[ ]` Greater-than-or-equal / less-than-or-equal assertions
-- `[ ]` Empty/non-empty assertions
-- `[ ]` Starts-with / ends-with assertions
-- `[ ]` Regex assertions
-- `[ ]` Array key/value assertions
-- `[ ]` Count assertions beyond length
-- `[ ]` Exception message assertions
-- `[ ]` Exception code assertions
-- `[ ]` Float tolerance assertions
+- `[x]` Greater-than-or-equal / less-than-or-equal assertions
+- `[x]` Empty/non-empty assertions
+- `[x]` Starts-with / ends-with assertions
+- `[x]` Regex assertions
+- `[x]` Array key/value assertions
+- `[x]` Count assertions beyond length
+- `[x]` Exception message assertions
+- `[x]` Exception code assertions
+- `[x]` Float tolerance assertions
 - `[ ]` JSON assertions
 - `[ ]` XML assertions
 - `[ ]` File-system assertions
@@ -80,12 +79,12 @@ Current behavior: assertions work, but the API is still a growing list of method
 
 This section is the main product goal: can PHPUnit capabilities be used through fluent Testify APIs instead of requiring class-based `TestCase` usage?
 
-- `[ ]` Fluent datasets equivalent to PHPUnit data providers
-- `[ ]` Named datasets in fluent tests
+- `[x]` Fluent datasets equivalent to PHPUnit data providers
+- `[x]` Named datasets in fluent tests
 - `[ ]` Fluent dependency chaining equivalent to `#[Depends]`
-- `[ ]` Fluent group/tag registration equivalent to `#[Group]`
-- `[ ]` Fluent skip API
-- `[ ]` Fluent incomplete/todo API
+- `[x]` Fluent group/tag registration equivalent to `#[Group]`
+- `[x]` Fluent skip API
+- `[x]` Fluent incomplete/todo API
 - `[ ]` Fluent does-not-perform-assertions semantics
 - `[ ]` Fluent requirement guards for OS/PHP/extension constraints
 - `[ ]` Fluent TestDox-style labeling or human-readable case labels
@@ -95,14 +94,13 @@ This section is the main product goal: can PHPUnit capabilities be used through 
 - `[x]` Runs fluent suites registered through `describe()`
 - `[x]` Runs fluent hooks in basic suite order
 - `[x]` Avoids retrying `afterEach()` after it throws
-- `[-]` Nested hook inheritance
-Current behavior: hooks are stored on the active suite only.
-- `[ ]` Parent-child suite composition
-- `[ ]` Shared metadata propagation through nested suites
-- `[ ]` Dataset-expanded fluent test execution
+- `[x]` Nested hook inheritance
+- `[x]` Parent-child suite composition
+- `[x]` Shared metadata propagation through nested suites
+- `[x]` Dataset-expanded fluent test execution
 - `[ ]` Dependency-aware fluent test execution
-- `[ ]` Group-aware fluent filtering and execution
-- `[ ]` Per-test skip/incomplete state in the suite model
+- `[x]` Group-aware fluent filtering and execution
+- `[x]` Per-test skip/incomplete state in the suite model
 
 ## 5. Mixed Runtime Compatibility
 
@@ -137,7 +135,7 @@ Current behavior: lifecycle failures are reported, but full PHPUnit-equivalent b
 - `[x]` Supports verbose labels
 - `[-]` Fluent-test-aware labeling
 Current behavior: labels are basic test names or suite-qualified names in verbose mode.
-- `[ ]` Dataset labels in output
+- `[x]` Dataset labels in output
 - `[ ]` Group/tag labels in output
 - `[ ]` TestDox-style output for fluent tests
 - `[ ]` Structured machine-readable output
@@ -154,11 +152,11 @@ Current behavior: labels are basic test names or suite-qualified names in verbos
 - `[x]` Watch mode tracks `src/` and `tests/` PHP files plus config/bootstrap files
 - `[-]` Filtering semantics suitable for fluent test usage
 Current behavior: filtering is substring-based only.
-- `[ ]` Filter by fluent group/tag
+- `[x]` Filter by fluent group/tag
 - `[ ]` Filter by exact suite/test path
 - `[ ]` Stop-on-failure controls
-- `[ ]` `--help`
-- `[ ]` `--version`
+- `[x]` `--help`
+- `[x]` `--version`
 - `[ ]` Output modes for CI and machine consumers
 
 ## 8. Configuration
@@ -194,9 +192,9 @@ Current behavior: the README communicates DX goals, but not yet as a formal prod
 
 ## Immediate Priority Backlog
 
-- `[ ]` Add fluent datasets API that maps cleanly to PHPUnit-style data providers
-- `[ ]` Add fluent skip/incomplete API
-- `[ ]` Add fluent groups/tags API plus CLI filtering support
-- `[ ]` Redesign suite metadata so fluent tests can carry datasets, tags, skip state, and labels
-- `[ ]` Expand `expect()` by assertion families most commonly used in day-to-day tests
+- `[x]` Add fluent datasets API that maps cleanly to PHPUnit-style data providers
+- `[x]` Add fluent skip/incomplete API
+- `[x]` Add fluent groups/tags API plus CLI filtering support
+- `[x]` Redesign suite metadata so fluent tests can carry datasets, tags, skip state, and labels
+- `[x]` Expand `expect()` by assertion families most commonly used in day-to-day tests
 - `[ ]` Define how PHPUnit compatibility should be exposed through fluent syntax before adding more class-style parity work

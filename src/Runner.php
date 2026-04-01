@@ -18,11 +18,17 @@ final class Runner
     /** @var array<string, mixed> */
     private array $config;
 
-    /** @var array{filter:?string,colors:bool,verbose:bool} */
+    /** @var array{filter:?string,colors:bool,verbose:bool,groups:list<string>,excludeGroups:list<string>} */
     private array $options;
 
     /**
-     * @param array{filter?:?string,colors?:bool,verbose?:bool} $options
+     * @param array{
+     *   filter?:?string,
+     *   colors?:bool,
+     *   verbose?:bool,
+     *   groups?:list<string>,
+     *   excludeGroups?:list<string>
+     * } $options
      */
     public function __construct(string $configFile, array $options = [])
     {
@@ -42,6 +48,8 @@ final class Runner
             'filter' => $options['filter'] ?? null,
             'colors' => array_key_exists('colors', $options) ? (bool) $options['colors'] : $defaultColors,
             'verbose' => (bool) ($options['verbose'] ?? false),
+            'groups' => $this->normalizeGroups($options['groups'] ?? []),
+            'excludeGroups' => $this->normalizeGroups($options['excludeGroups'] ?? []),
         ];
     }
 
@@ -87,12 +95,24 @@ final class Runner
 
     /**
      * @param list<array{
-     *   name: string,
-     *   tests: array<int, array{name: string, fn: callable}>,
-     *   beforeAll: list<callable>,
-     *   afterAll: list<callable>,
-     *   beforeEach: list<callable>,
-     *   afterEach: list<callable>
+     *   id:int,
+     *   name:string,
+     *   parentId:?int,
+     *   groups:list<string>,
+     *   beforeAll:list<callable>,
+     *   afterAll:list<callable>,
+     *   beforeEach:list<callable>,
+     *   afterEach:list<callable>,
+     *   tests:list<array{
+     *     id:int,
+     *     name:string,
+     *     fn:callable,
+     *     groups:list<string>,
+     *     datasets:list<array{name:?string,args:list<mixed>}>,
+     *     skip:?string,
+     *     incomplete:?string
+     *   }>,
+     *   children:list<array>
      * }> $specSuites
      */
     private function executeAll(array $specSuites): int
@@ -119,10 +139,10 @@ final class Runner
         }
 
         foreach ($specSuites as $suite) {
-            $duration = $this->executeSpecSuite($suite, $stats);
+            $duration = $this->executeSpecSuiteTree($suite, [], [], [], '', $stats);
             if ($duration !== null) {
                 $suiteDurations[] = [
-                    'class' => $suite['name'],
+                    'class' => $this->suitePath($suite['name'], ''),
                     'duration' => $duration,
                 ];
             }
@@ -155,14 +175,15 @@ final class Runner
     }
 
     /**
-     * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
-     */
-    /**
      * @param class-string<PhpUnitTestCase> $className
      * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
      */
     private function executePhpUnitSuite(string $className, array &$stats): ?float
     {
+        if ($this->options['groups'] !== [] || $this->options['excludeGroups'] !== []) {
+            return null;
+        }
+
         $methods = $this->filterPhpUnitMethods($this->collectTestMethods($className));
         if ($methods === []) {
             return null;
@@ -196,44 +217,75 @@ final class Runner
     }
 
     /**
-     * @param array{
-     *   name: string,
-     *   tests: array<int, array{name: string, fn: callable}>,
-     *   beforeAll: list<callable>,
-     *   afterAll: list<callable>,
-     *   beforeEach: list<callable>,
-     *   afterEach: list<callable>
-     * } $suite
+     * @param array<string, mixed> $suite
+     * @param list<callable> $inheritedBeforeEach
+     * @param list<callable> $inheritedAfterEach
+     * @param list<string> $ancestorGroups
      * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
      */
-    private function executeSpecSuite(array $suite, array &$stats): ?float
-    {
-        $tests = $this->filterSpecTests($suite['tests']);
-        if ($tests === []) {
+    private function executeSpecSuiteTree(
+        array $suite,
+        array $inheritedBeforeEach,
+        array $inheritedAfterEach,
+        array $ancestorGroups,
+        string $parentPath,
+        array &$stats
+    ): ?float {
+        $suitePath = $this->suitePath($suite['name'], $parentPath);
+        $effectiveGroups = $this->mergeGroups($ancestorGroups, $suite['groups']);
+        $filteredTests = $this->filterSpecTests($suite['tests'], $suitePath, $effectiveGroups);
+        $childrenToRun = [];
+
+        foreach ($suite['children'] as $child) {
+            if ($this->suiteContainsRunnableTests($child, $suitePath, $effectiveGroups)) {
+                $childrenToRun[] = $child;
+            }
+        }
+
+        if ($filteredTests === [] && $childrenToRun === []) {
             return null;
         }
 
         $suiteStart = microtime(true);
-        $this->printSuiteHeader($suite['name']);
+        $this->printSuiteHeader($suitePath);
+
+        $beforeAll = $suite['beforeAll'];
+        $afterAll = $suite['afterAll'];
+        $beforeEach = array_values(array_merge($inheritedBeforeEach, $suite['beforeEach']));
+        $afterEach = array_values(array_merge($suite['afterEach'], $inheritedAfterEach));
 
         try {
-            $this->executeHooks($suite['beforeAll']);
+            $this->executeHooks($beforeAll);
         } catch (Throwable $throwable) {
-            $labels = array_map(static fn (array $test): string => $test['name'], $tests);
-            $this->recordLifecycleFailure($suite['name'], $labels, 'beforeAll', $throwable, $stats);
+            $labels = array_map(
+                fn (array $test): string => $this->buildSpecLabel($suitePath, $test['name'], null),
+                $filteredTests
+            );
+            $this->recordLifecycleFailure($suitePath, $labels, 'beforeAll', $throwable, $stats);
             $this->printSuiteFooter($suiteStart);
 
             return microtime(true) - $suiteStart;
         }
 
-        foreach ($tests as $test) {
-            $this->executeSpecTest($suite['name'], $test, $suite['beforeEach'], $suite['afterEach'], $stats);
+        foreach ($filteredTests as $test) {
+            $this->executeSpecTest($suitePath, $test, $effectiveGroups, $beforeEach, $afterEach, $stats);
+        }
+
+        foreach ($childrenToRun as $child) {
+            $this->executeSpecSuiteTree(
+                $child,
+                $beforeEach,
+                $afterEach,
+                $effectiveGroups,
+                $suitePath,
+                $stats
+            );
         }
 
         try {
-            $this->executeHooks($suite['afterAll']);
+            $this->executeHooks($afterAll);
         } catch (Throwable $throwable) {
-            $this->recordSingleFailure($suite['name'] . '::afterAll', 'Suite teardown failed: ' . $throwable->getMessage(), $stats);
+            $this->recordSingleFailure($suitePath . '::afterAll', 'Suite teardown failed: ' . $throwable->getMessage(), $stats);
         }
 
         $this->printSuiteFooter($suiteStart);
@@ -242,70 +294,55 @@ final class Runner
     }
 
     /**
-     * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
-     */
-    private function executePhpUnitTestCase(string $className, string $methodName, array &$stats): void
-    {
-        $start = microtime(true);
-        $status = 'PASS';
-        $message = null;
-        $tearDownAttempted = false;
-
-        try {
-            $testObject = $this->instantiateTestCase($className, $methodName);
-            $this->callIfExists($testObject, 'setUp');
-            $this->callRequired($testObject, $methodName);
-            $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
-        } catch (Throwable $throwable) {
-            $status = $this->classifyThrowable($throwable);
-            $message = $throwable->getMessage();
-
-            if (isset($testObject)) {
-                try {
-                    $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
-                } catch (Throwable) {
-                }
-            }
-        }
-
-        $label = $this->options['verbose'] ? "{$className}::{$methodName}" : $methodName;
-        $this->reportTestResult($label, $status, $message, microtime(true) - $start, $stats);
-    }
-
-    /**
-     * @param array{name: string, fn: callable} $test
+     * @param array<string, mixed> $test
+     * @param list<string> $suiteGroups
      * @param list<callable> $beforeEach
      * @param list<callable> $afterEach
      * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
      */
     private function executeSpecTest(
-        string $suiteName,
+        string $suitePath,
         array $test,
+        array $suiteGroups,
         array $beforeEach,
         array $afterEach,
         array &$stats
     ): void {
-        $start = microtime(true);
-        $status = 'PASS';
-        $message = null;
-        $afterEachAttempted = false;
+        $datasets = $test['datasets'] !== []
+            ? $test['datasets']
+            : [['name' => null, 'args' => []]];
 
-        try {
-            $this->executeHooks($beforeEach);
-            ($test['fn'])();
-            $this->executeHooksOnce($afterEach, $afterEachAttempted);
-        } catch (Throwable $throwable) {
-            $status = $this->classifyThrowable($throwable);
-            $message = $throwable->getMessage();
+        foreach ($datasets as $dataset) {
+            $start = microtime(true);
+            $status = 'PASS';
+            $message = null;
+            $afterEachAttempted = false;
 
-            try {
-                $this->executeHooksOnce($afterEach, $afterEachAttempted);
-            } catch (Throwable) {
+            if ($test['skip'] !== null) {
+                $status = 'SKIP';
+                $message = $test['skip'];
+            } elseif ($test['incomplete'] !== null) {
+                $status = 'INCOMPLETE';
+                $message = $test['incomplete'];
+            } else {
+                try {
+                    $this->executeHooks($beforeEach);
+                    ($test['fn'])(...$dataset['args']);
+                    $this->executeHooksOnce($afterEach, $afterEachAttempted);
+                } catch (Throwable $throwable) {
+                    $status = $this->classifyThrowable($throwable);
+                    $message = $throwable->getMessage();
+
+                    try {
+                        $this->executeHooksOnce($afterEach, $afterEachAttempted);
+                    } catch (Throwable) {
+                    }
+                }
             }
-        }
 
-        $label = $this->options['verbose'] ? "{$suiteName}::{$test['name']}" : $test['name'];
-        $this->reportTestResult($label, $status, $message, microtime(true) - $start, $stats);
+            $label = $this->buildSpecLabel($suitePath, $test['name'], $dataset['name']);
+            $this->reportTestResult($label, $status, $message, microtime(true) - $start, $stats);
+        }
     }
 
     /**
@@ -351,22 +388,88 @@ final class Runner
     }
 
     /**
-     * @param array<int, array{name: string, fn: callable}> $tests
-     * @return list<array{name: string, fn: callable}>
+     * @param list<array{
+     *   id:int,
+     *   name:string,
+     *   fn:callable,
+     *   groups:list<string>,
+     *   datasets:list<array{name:?string,args:list<mixed>}>,
+     *   skip:?string,
+     *   incomplete:?string
+     * }> $tests
+     * @param list<string> $suiteGroups
+     * @return list<array{
+     *   id:int,
+     *   name:string,
+     *   fn:callable,
+     *   groups:list<string>,
+     *   datasets:list<array{name:?string,args:list<mixed>}>,
+     *   skip:?string,
+     *   incomplete:?string
+     * }>
      */
-    private function filterSpecTests(array $tests): array
+    private function filterSpecTests(array $tests, string $suitePath, array $suiteGroups): array
     {
-        $filter = $this->options['filter'];
-        if ($filter === null || $filter === '') {
-            return array_values($tests);
-        }
-
         return array_values(
             array_filter(
                 $tests,
-                static fn (array $test): bool => stripos($test['name'], $filter) !== false
+                function (array $test) use ($suitePath, $suiteGroups): bool {
+                    $groups = $this->mergeGroups($suiteGroups, $test['groups']);
+
+                    if (!$this->matchesGroupFilters($groups)) {
+                        return false;
+                    }
+
+                    $filter = $this->options['filter'];
+                    if ($filter === null || $filter === '') {
+                        return true;
+                    }
+
+                    if (stripos($test['name'], $filter) !== false || stripos($suitePath, $filter) !== false) {
+                        return true;
+                    }
+
+                    foreach ($test['datasets'] as $dataset) {
+                        if ($dataset['name'] !== null && stripos($dataset['name'], $filter) !== false) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                }
             )
         );
+    }
+
+    /**
+     * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
+     */
+    private function executePhpUnitTestCase(string $className, string $methodName, array &$stats): void
+    {
+        $start = microtime(true);
+        $status = 'PASS';
+        $message = null;
+        $tearDownAttempted = false;
+
+        try {
+            $testObject = $this->instantiateTestCase($className, $methodName);
+            $this->callIfExists($testObject, 'setUp');
+            $this->callRequired($testObject, $methodName);
+            $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
+        } catch (Throwable $throwable) {
+            $status = $this->classifyThrowable($throwable);
+            $message = $throwable->getMessage();
+
+            if (isset($testObject)) {
+                try {
+                    $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
+                } catch (Throwable) {
+                }
+            }
+        }
+
+        $label = $this->options['verbose'] ? "{$className}::{$methodName}" : $methodName;
+        $this->reportTestResult($label, $status, $message, microtime(true) - $start, $stats);
     }
 
     private function printSuiteHeader(string $suiteName): void
@@ -772,5 +875,92 @@ final class Runner
         sort($files);
 
         return $files;
+    }
+
+    /**
+     * @param list<string> $groups
+     * @return list<string>
+     */
+    private function normalizeGroups(array $groups): array
+    {
+        $normalized = [];
+
+        foreach ($groups as $group) {
+            $group = trim($group);
+            if ($group === '') {
+                continue;
+            }
+
+            $normalized[] = $group;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    private function buildSpecLabel(string $suitePath, string $testName, ?string $datasetName): string
+    {
+        $label = $this->options['verbose'] ? "{$suitePath}::{$testName}" : $testName;
+
+        if ($datasetName !== null && $datasetName !== '') {
+            $label .= ' [' . $datasetName . ']';
+        }
+
+        return $label;
+    }
+
+    private function suitePath(string $suiteName, string $parentPath): string
+    {
+        return $parentPath === '' ? $suiteName : $parentPath . ' > ' . $suiteName;
+    }
+
+    /**
+     * @param list<string> $parentGroups
+     * @param list<string> $localGroups
+     * @return list<string>
+     */
+    private function mergeGroups(array $parentGroups, array $localGroups): array
+    {
+        $merged = array_values(array_unique(array_merge($parentGroups, $localGroups)));
+        sort($merged);
+
+        return $merged;
+    }
+
+    /**
+     * @param list<string> $groups
+     */
+    private function matchesGroupFilters(array $groups): bool
+    {
+        if ($this->options['groups'] !== [] && array_intersect($this->options['groups'], $groups) === []) {
+            return false;
+        }
+
+        if ($this->options['excludeGroups'] !== [] && array_intersect($this->options['excludeGroups'], $groups) !== []) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $suite
+     * @param list<string> $ancestorGroups
+     */
+    private function suiteContainsRunnableTests(array $suite, string $parentPath, array $ancestorGroups): bool
+    {
+        $suitePath = $this->suitePath($suite['name'], $parentPath);
+        $suiteGroups = $this->mergeGroups($ancestorGroups, $suite['groups']);
+
+        if ($this->filterSpecTests($suite['tests'], $suitePath, $suiteGroups) !== []) {
+            return true;
+        }
+
+        foreach ($suite['children'] as $child) {
+            if ($this->suiteContainsRunnableTests($child, $suitePath, $suiteGroups)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

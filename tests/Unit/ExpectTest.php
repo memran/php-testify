@@ -43,6 +43,36 @@ final class ExpectTest extends TestCase
         $expect->toThrow(\InvalidArgumentException::class);
     }
 
+    public function testExpandedMatchersCoverCommonDailyAssertions(): void
+    {
+        $payload = ['name' => 'Ada', 'age' => 12];
+
+        (new Expect(10))->toBeGreaterThanOrEqual(10);
+        (new Expect(10))->toBeLessThanOrEqual(10);
+        (new Expect(3.14159))->toBeCloseTo(3.14, 0.01);
+        (new Expect('php-testify'))->toStartWith('php');
+        (new Expect('php-testify'))->toEndWith('fy');
+        (new Expect('php-testify'))->toMatch('/test/i');
+        (new Expect($payload))->toHaveKey('name');
+        (new Expect($payload))->toHaveKeyWithValue('age', 12);
+        (new Expect([]))->toBeEmpty();
+        (new Expect(['a', 'b']))->toHaveCount(2);
+
+        $this->addToAssertionCount(10);
+    }
+
+    public function testExceptionMessageAndCodeMatchersWork(): void
+    {
+        $expect = new Expect(static function (): void {
+            throw new \RuntimeException('boom', 42);
+        });
+
+        $expect->toThrowWithMessage(\RuntimeException::class, 'boom');
+        $expect->toThrowWithCode(\RuntimeException::class, 42);
+
+        $this->addToAssertionCount(2);
+    }
+
     #[DataProvider('invalidNumericAssertionProvider')]
     public function testNumericAssertionsRejectUnsupportedValues(string $method, mixed $value): void
     {
@@ -67,6 +97,21 @@ final class ExpectTest extends TestCase
         yield 'less than with object' => [
             'method' => 'toBeLessThan',
             'value' => new \stdClass(),
+        ];
+
+        yield 'greater than or equal with string' => [
+            'method' => 'toBeGreaterThanOrEqual',
+            'value' => '10',
+        ];
+
+        yield 'less than or equal with object' => [
+            'method' => 'toBeLessThanOrEqual',
+            'value' => new \stdClass(),
+        ];
+
+        yield 'close to with string' => [
+            'method' => 'toBeCloseTo',
+            'value' => '10',
         ];
     }
 }

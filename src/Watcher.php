@@ -16,7 +16,7 @@ final class Watcher
 {
     private string $configFile;
 
-    /** @var array{filter:?string,colors:bool,verbose:bool} */
+    /** @var array{filter:?string,colors:bool,verbose:bool,groups:list<string>,excludeGroups:list<string>} */
     private array $options;
 
     /** @var list<string> */
@@ -26,7 +26,13 @@ final class Watcher
     private array $watchFiles;
 
     /**
-     * @param array{filter?:?string,colors?:bool,verbose?:bool} $options
+     * @param array{
+     *   filter?:?string,
+     *   colors?:bool,
+     *   verbose?:bool,
+     *   groups?:list<string>,
+     *   excludeGroups?:list<string>
+     * } $options
      */
     public function __construct(string $configFile, array $options)
     {
@@ -39,6 +45,8 @@ final class Watcher
             'filter'  => $options['filter'] ?? null,
             'colors'  => (bool) ($options['colors'] ?? true),
             'verbose' => (bool) ($options['verbose'] ?? false),
+            'groups' => array_values(array_unique(array_filter(array_map('trim', $options['groups'] ?? []), static fn (string $group): bool => $group !== ''))),
+            'excludeGroups' => array_values(array_unique(array_filter(array_map('trim', $options['excludeGroups'] ?? []), static fn (string $group): bool => $group !== ''))),
         ];
         ['directories' => $this->watchDirectories, 'files' => $this->watchFiles] = $this->buildWatchTargets();
     }
@@ -160,6 +168,16 @@ final class Watcher
 
         if ($this->options['verbose']) {
             $command[] = '--verbose';
+        }
+
+        foreach ($this->options['groups'] as $group) {
+            $command[] = '--group';
+            $command[] = $group;
+        }
+
+        foreach ($this->options['excludeGroups'] as $group) {
+            $command[] = '--exclude-group';
+            $command[] = $group;
         }
 
         if ($this->options['colors'] === false) {
