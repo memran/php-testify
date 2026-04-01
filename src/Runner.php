@@ -249,19 +249,20 @@ final class Runner
         $start = microtime(true);
         $status = 'PASS';
         $message = null;
+        $tearDownAttempted = false;
 
         try {
             $testObject = $this->instantiateTestCase($className, $methodName);
             $this->callIfExists($testObject, 'setUp');
             $this->callRequired($testObject, $methodName);
-            $this->callIfExists($testObject, 'tearDown');
+            $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
         } catch (Throwable $throwable) {
             $status = $this->classifyThrowable($throwable);
             $message = $throwable->getMessage();
 
             if (isset($testObject)) {
                 try {
-                    $this->callIfExists($testObject, 'tearDown');
+                    $this->callIfExistsOnce($testObject, 'tearDown', $tearDownAttempted);
                 } catch (Throwable) {
                 }
             }
@@ -287,17 +288,18 @@ final class Runner
         $start = microtime(true);
         $status = 'PASS';
         $message = null;
+        $afterEachAttempted = false;
 
         try {
             $this->executeHooks($beforeEach);
             ($test['fn'])();
-            $this->executeHooks($afterEach);
+            $this->executeHooksOnce($afterEach, $afterEachAttempted);
         } catch (Throwable $throwable) {
             $status = $this->classifyThrowable($throwable);
             $message = $throwable->getMessage();
 
             try {
-                $this->executeHooks($afterEach);
+                $this->executeHooksOnce($afterEach, $afterEachAttempted);
             } catch (Throwable) {
             }
         }
@@ -314,6 +316,19 @@ final class Runner
         foreach ($hooks as $hook) {
             $hook();
         }
+    }
+
+    /**
+     * @param list<callable> $hooks
+     */
+    private function executeHooksOnce(array $hooks, bool &$attempted): void
+    {
+        if ($attempted) {
+            return;
+        }
+
+        $attempted = true;
+        $this->executeHooks($hooks);
     }
 
     /**
@@ -594,6 +609,16 @@ final class Runner
         }
 
         (new ReflectionMethod($object, $method))->invoke($object);
+    }
+
+    private function callIfExistsOnce(object $object, string $method, bool &$attempted): void
+    {
+        if ($attempted) {
+            return;
+        }
+
+        $attempted = true;
+        $this->callIfExists($object, $method);
     }
 
     private function callStaticIfExists(string $className, string $method): void

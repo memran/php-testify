@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use Testify\Watcher;
 
 final class WatcherTest extends TestCase
@@ -39,10 +41,18 @@ final class WatcherTest extends TestCase
 
     protected function tearDown(): void
     {
-        @unlink($this->tempDir . '/tests/example_test.php');
-        @unlink($this->tempDir . '/bootstrap.php');
-        @unlink($this->tempDir . '/phpunit.config.php');
-        @rmdir($this->tempDir . '/tests');
+        if (is_dir($this->tempDir)) {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($this->tempDir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+
+            foreach ($iterator as $entry) {
+                $path = $entry->getPathname();
+                $entry->isDir() ? @rmdir($path) : @unlink($path);
+            }
+        }
+
         @rmdir($this->tempDir);
     }
 
@@ -90,5 +100,77 @@ final class WatcherTest extends TestCase
         $exitCode = $watcher->runOnce();
 
         self::assertSame(0, $exitCode);
+    }
+
+    public function testSnapshotTracksNestedPhpFiles(): void
+    {
+        mkdir($this->tempDir . '/tests/nested/deeper', 0777, true);
+        file_put_contents($this->tempDir . '/tests/nested/deeper/nested_test.php', "<?php\n");
+
+        $watcher = new Watcher($this->configFile, [
+            'colors' => false,
+            'verbose' => false,
+        ]);
+
+        /** @var array<string, int> $snapshot */
+        $snapshot = \Closure::bind(
+            function (): array {
+                return $this->snapshotFiles();
+            },
+            $watcher,
+            $watcher
+        )();
+
+        self::assertArrayHasKey($this->tempDir . '/tests/nested/deeper/nested_test.php', $snapshot);
+    }
+
+    public function testStreamProcessPipesDrainsStdoutAndStderr(): void
+    {
+        $watcher = new Watcher($this->configFile, [
+            'colors' => false,
+            'verbose' => false,
+        ]);
+
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open(
+            [PHP_BINARY, '-r', 'for ($i = 0; $i < 1000; $i++) { fwrite(STDOUT, "o"); fwrite(STDERR, "e"); }'],
+            $descriptorSpec,
+            $pipes,
+            $this->tempDir
+        );
+
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+
+        $stdout = fopen('php://temp', 'w+');
+        $stderr = fopen('php://temp', 'w+');
+        self::assertIsResource($stdout);
+        self::assertIsResource($stderr);
+
+        \Closure::bind(
+            function (array $pipes, $stdout, $stderr, $process): void {
+                $this->streamProcessPipes($pipes, $stdout, $stderr, $process);
+            },
+            $watcher,
+            $watcher
+        )($pipes, $stdout, $stderr, $process);
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+
+        rewind($stdout);
+        rewind($stderr);
+
+        self::assertSame(0, $exitCode);
+        self::assertSame(1000, strlen(stream_get_contents($stdout) ?: ''));
+        self::assertSame(1000, strlen(stream_get_contents($stderr) ?: ''));
+
+        fclose($stdout);
+        fclose($stderr);
     }
 }
