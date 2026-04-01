@@ -121,7 +121,13 @@ final class WatcherTest extends TestCase
             $watcher
         )();
 
-        self::assertArrayHasKey($this->tempDir . '/tests/nested/deeper/nested_test.php', $snapshot);
+        $expectedPath = str_replace('\\', '/', $this->tempDir . '/tests/nested/deeper/nested_test.php');
+        $snapshotPaths = array_map(
+            static fn (string $path): string => str_replace('\\', '/', $path),
+            array_keys($snapshot)
+        );
+
+        self::assertContains($expectedPath, $snapshotPaths);
     }
 
     public function testStreamProcessPipesDrainsStdoutAndStderr(): void
