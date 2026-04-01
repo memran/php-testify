@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use PHPUnit\Framework\TestCase;
 
 final class SampleTest extends TestCase
@@ -10,10 +12,10 @@ final class SampleTest extends TestCase
         $this->assertSame(5, $sum);
     }
 
-    public function test_fails_on_purpose(): void
+    public function test_supports_simple_assertions(): void
     {
         $x = 100;
-        $this->assertSame(200, $x, "x should be 200");
+        $this->assertSame(100, $x);
     }
 
     public function test_skipped_example(): void

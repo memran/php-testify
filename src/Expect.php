@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Testify;
 
 use Throwable;
+use Traversable;
 
 /**
  * Vitest/Jest-style fluent expectations.
@@ -24,6 +27,7 @@ final class Expect
     {
         $clone = clone $this;
         $clone->negate = !$this->negate;
+
         return $clone;
     }
 
@@ -97,16 +101,20 @@ final class Expect
 
     public function toBeGreaterThan(float|int $threshold): void
     {
+        $actual = $this->requireNumericValue('toBeGreaterThan');
+
         $this->check(
-            $this->value > $threshold,
+            $actual > $threshold,
             "Expected {$this->repr($this->value)} to be greater than {$threshold}"
         );
     }
 
     public function toBeLessThan(float|int $threshold): void
     {
+        $actual = $this->requireNumericValue('toBeLessThan');
+
         $this->check(
-            $this->value < $threshold,
+            $actual < $threshold,
             "Expected {$this->repr($this->value)} to be less than {$threshold}"
         );
     }
@@ -120,6 +128,13 @@ final class Expect
             $found = str_contains($v, $item);
         } elseif (is_array($v)) {
             $found = in_array($item, $v, true);
+        } elseif ($v instanceof Traversable) {
+            foreach ($v as $entry) {
+                if ($entry === $item) {
+                    $found = true;
+                    break;
+                }
+            }
         }
 
         $this->check(
@@ -139,7 +154,9 @@ final class Expect
         } elseif (is_countable($value)) {
             $actual = count($value);
         } else {
-            $actual = 0;
+            throw new TestFailureException(
+                'toHaveLength expects a string, array, or Countable value'
+            );
         }
 
         $this->check(
@@ -174,6 +191,7 @@ final class Expect
                 : "Expected exception {$exceptionClass}, but nothing was thrown"
         );
     }
+
     public function toBeSameObject(object $expected): void
     {
         $this->check(
@@ -200,11 +218,37 @@ final class Expect
 
     private function repr(mixed $v): string
     {
-        if (is_string($v)) return '"' . $v . '"';
-        if (is_bool($v)) return $v ? 'true' : 'false';
-        if ($v === null) return 'null';
-        if (is_array($v)) return 'array(' . count($v) . ')';
-        if (is_object($v)) return 'object(' . get_class($v) . ')';
+        if (is_string($v)) {
+            return '"' . $v . '"';
+        }
+
+        if (is_bool($v)) {
+            return $v ? 'true' : 'false';
+        }
+
+        if ($v === null) {
+            return 'null';
+        }
+
+        if (is_array($v)) {
+            return 'array(' . count($v) . ')';
+        }
+
+        if (is_object($v)) {
+            return 'object(' . get_class($v) . ')';
+        }
+
         return (string)$v;
+    }
+
+    private function requireNumericValue(string $method): int|float
+    {
+        if (!is_int($this->value) && !is_float($this->value)) {
+            throw new TestFailureException(
+                sprintf('%s expects an integer or float, got %s', $method, get_debug_type($this->value))
+            );
+        }
+
+        return $this->value;
     }
 }

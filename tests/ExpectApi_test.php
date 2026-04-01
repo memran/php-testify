@@ -1,12 +1,14 @@
 <?php
 
-use function Testify\describe;
-use function Testify\it;
-use function Testify\expect;
-use function Testify\beforeAll;
+declare(strict_types=1);
+
 use function Testify\afterAll;
-use function Testify\beforeEach;
 use function Testify\afterEach;
+use function Testify\beforeAll;
+use function Testify\beforeEach;
+use function Testify\describe;
+use function Testify\expect;
+use function Testify\it;
 
 class DummyUser
 {
@@ -59,13 +61,13 @@ describe('php-testify expectation API', function () {
         expect($shared['x'])->toBe(10);
         expect($shared['x'])->toEqual(10); // == is same in this case
 
-        // Arrays: === would fail, but toEqual uses loose equality (==)
         $a = ['key' => 'value'];
         $b = ['key' => 'value'];
         expect($a)->toEqual($b);
 
-        // sanity: strict equality vs loose (just to confirm not() also works)
-        expect($a)->not()->toBe($b);
+        $user = new DummyUser();
+        $clone = clone $user;
+        expect($user)->not()->toBeSameObject($clone);
     });
 
     it('truthiness / falsiness / null', function () use (&$shared) {

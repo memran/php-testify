@@ -1,6 +1,8 @@
 <?php
 
-use function Testify\{expect, describe, it};
+declare(strict_types=1);
+
+use function Testify\{describe, expect, it};
 
 describe('Expectation API', function () {
     it('handles truthiness', function () {
@@ -17,11 +19,11 @@ describe('Expectation API', function () {
     it('checks arrays and strings', function () {
         expect(['a', 'b'])->toContain('a');
         expect('hello world')->toContain('world');
-        expect('abc')->toHaveLength(1);
+        expect('abc')->toHaveLength(3);
     });
 
     it('checks thrown exceptions', function () {
-        $fn = fn() => throw new InvalidArgumentException("fail");
+        $fn = fn () => throw new InvalidArgumentException("fail");
         expect($fn)->toThrow(InvalidArgumentException::class);
     });
 

@@ -1,10 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Testify;
 
-use PHPUnit\Framework\TestCase as PhpUnitTestCase;
-use RuntimeException;
 use ReflectionClass;
+use RuntimeException;
 
 /**
  * SpecBridge converts Testify's describe()/it() suites
@@ -26,8 +27,8 @@ final class SpecBridge
     /**
      * Generate PHPUnit-compatible classes for all suites.
      *
-     * @return array<int, class-string> FQCNs created (not currently used by Runner directly,
-     *                                   but good to keep return signature for possible future logic)
+     * @return list<string> FQCNs created (not currently used by Runner directly,
+     *                      but good to keep return signature for possible future logic)
      */
     public function materializeSpecClasses(): array
     {
@@ -64,11 +65,11 @@ final class SpecBridge
             $beforeEachClosures  = $suite['beforeEach'];
             $afterEachClosures   = $suite['afterEach'];
 
+            /** @var class-string $fqcn */
             $refClass = new ReflectionClass($fqcn);
 
             // set __specClosures
             $prop = $refClass->getProperty('__specClosures');
-            $prop->setAccessible(true);
             $prop->setValue(null, $testClosures);
 
             // set hook arrays
@@ -81,7 +82,6 @@ final class SpecBridge
 
             foreach ($map as $propName => $value) {
                 $p = $refClass->getProperty($propName);
-                $p->setAccessible(true);
                 $p->setValue(null, $value);
             }
 
@@ -125,7 +125,11 @@ final class SpecBridge
         array $beforeEach,
         array $afterEach,
     ): string {
-        $lastSep   = strrpos($fqcn, '\\');
+        $lastSep = strrpos($fqcn, '\\');
+        if ($lastSep === false) {
+            throw new RuntimeException("Generated suite class must contain a namespace: {$fqcn}");
+        }
+
         $ns        = substr($fqcn, 0, $lastSep);
         $shortName = substr($fqcn, $lastSep + 1);
 

@@ -1,6 +1,8 @@
 #!/usr/bin/env php
 <?php
 
+declare(strict_types=1);
+
 // Try to locate Composer's autoloader in two scenarios:
 // 1. Running php-testify in its own repo (dev mode).
 // 2. Running php-testify as a dependency from another project.

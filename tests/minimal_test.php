@@ -1,12 +1,14 @@
 <?php
 
-use function Testify\describe;
-use function Testify\it;
-use function Testify\expect;
-use function Testify\beforeAll;
+declare(strict_types=1);
+
 use function Testify\afterAll;
-use function Testify\beforeEach;
 use function Testify\afterEach;
+use function Testify\beforeAll;
+use function Testify\beforeEach;
+use function Testify\describe;
+use function Testify\expect;
+use function Testify\it;
 
 describe('Database test', function () {
     $shared = [];

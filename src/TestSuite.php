@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Testify;
 
 final class TestSuite
@@ -22,12 +24,26 @@ final class TestSuite
      * Notes:
      * - We collect hook callables as they are registered
      *   so SpecBridge can generate methods that execute them.
+     *
+     * @var list<array{
+     *   name: string,
+     *   tests: array<int, array{name: string, fn: callable}>,
+     *   beforeAll: list<callable>,
+     *   afterAll: list<callable>,
+     *   beforeEach: list<callable>,
+     *   afterEach: list<callable>
+     * }>
      */
     private array $suites = [];
 
+    /** @var list<int> */
+    private array $activeSuiteStack = [];
+
     private static ?self $instance = null;
 
-    private function __construct() {}
+    private function __construct()
+    {
+    }
 
     public static function getInstance(): self
     {
@@ -42,6 +58,8 @@ final class TestSuite
      */
     public function addSuite(string $name, callable $callback): void
     {
+        $suiteIndex = \count($this->suites);
+
         $this->suites[] = [
             'name'        => $name,
             'tests'       => [],
@@ -51,8 +69,14 @@ final class TestSuite
             'afterEach'   => [],
         ];
 
-        // Run the body so that it()/beforeEach() etc. get registered
-        $callback();
+        $this->activeSuiteStack[] = $suiteIndex;
+
+        try {
+            // Run the body so that it()/beforeEach() etc. get registered.
+            $callback();
+        } finally {
+            array_pop($this->activeSuiteStack);
+        }
     }
 
     /**
@@ -60,12 +84,7 @@ final class TestSuite
      */
     public function addTest(string $name, callable $fn): void
     {
-        $idx = \count($this->suites) - 1;
-        if ($idx < 0) {
-            throw new \RuntimeException(
-                "Cannot add test without an active suite. Call describe() first."
-            );
-        }
+        $idx = $this->requireActiveSuiteIndex();
 
         $this->suites[$idx]['tests'][] = [
             'name' => $name,
@@ -96,25 +115,48 @@ final class TestSuite
         $this->requireActiveSuite()['afterEach'][] = $fn;
     }
 
+    public function reset(): void
+    {
+        $this->suites = [];
+        $this->activeSuiteStack = [];
+    }
+
     /**
      * Helper for hook setters.
      */
+    /**
+     * @return array{
+     *   name: string,
+     *   tests: array<int, array{name: string, fn: callable}>,
+     *   beforeAll: list<callable>,
+     *   afterAll: list<callable>,
+     *   beforeEach: list<callable>,
+     *   afterEach: list<callable>
+     * }
+     */
     private function &requireActiveSuite(): array
     {
-        $idx = \count($this->suites) - 1;
-        if ($idx < 0) {
+        $idx = $this->requireActiveSuiteIndex();
+
+        return $this->suites[$idx];
+    }
+
+    private function requireActiveSuiteIndex(): int
+    {
+        $idx = $this->activeSuiteStack[\count($this->activeSuiteStack) - 1] ?? null;
+        if (!\is_int($idx)) {
             throw new \RuntimeException(
-                "No active describe() while registering a hook. Did you call beforeEach() outside describe()?"
+                "No active describe() context. Define hooks and tests inside describe()."
             );
         }
 
-        return $this->suites[$idx];
+        return $idx;
     }
 
     /**
      * Get all suites.
      *
-     * @return array<int, array{
+     * @return list<array{
      *   name: string,
      *   tests: array<int, array{name:string, fn:callable}>,
      *   beforeAll: list<callable>,

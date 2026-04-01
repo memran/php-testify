@@ -1,18 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Testify;
 
+use RuntimeException;
+
 /**
- * Watcher
- *
- * A lightweight file-watching loop for php-testify.
- *
- * It:
- *  - Scans project files (src + tests by default)
- *  - Records last modification times
- *  - On change, re-runs the test runner as a child process
- *
- * This keeps the parent process alive, so we don't hit "class redeclare" issues.
+ * Lightweight polling watcher for php-testify.
  */
 final class Watcher
 {
@@ -21,43 +16,27 @@ final class Watcher
     /** @var array{filter:?string,colors:bool,verbose:bool} */
     private array $options;
 
-    /**
-     * Paths / globs to watch.
-     * You can refine this if you want.
-     *
-     * @var array<int,string>
-     */
-    private array $watchGlobs = [
-        // source code
-        __DIR__ . '/../src/*.php',
-        __DIR__ . '/../src/**/*.php',
-        // tests
-        __DIR__ . '/../tests/*.php',
-        __DIR__ . '/../tests/**/*.php',
-        // configuration
-        __DIR__ . '/../phpunit.config.php',
-    ];
+    /** @var list<string> */
+    private array $watchPatterns;
 
     /**
-     * @param string $configFile absolute path to phpunit.config.php
-     * @param array{filter:?string,colors:bool,verbose:bool} $options
+     * @param array{filter?:?string,colors?:bool,verbose?:bool} $options
      */
     public function __construct(string $configFile, array $options)
     {
+        if (!is_file($configFile)) {
+            throw new RuntimeException("Config file not found: {$configFile}");
+        }
+
         $this->configFile = $configFile;
         $this->options = [
-            'filter'  => $options['filter']  ?? null,
-            'colors'  => (bool)($options['colors'] ?? true),
-            'verbose' => (bool)($options['verbose'] ?? false),
+            'filter'  => $options['filter'] ?? null,
+            'colors'  => (bool) ($options['colors'] ?? true),
+            'verbose' => (bool) ($options['verbose'] ?? false),
         ];
+        $this->watchPatterns = $this->buildWatchPatterns();
     }
 
-    /**
-     * Blocking loop:
-     *  - run tests once immediately
-     *  - then poll for file changes
-     *  - on change, clear screen (optional) and rerun
-     */
     public function watchLoop(): void
     {
         $lastState = $this->snapshotFiles();
@@ -65,9 +44,8 @@ final class Watcher
         $this->printBanner();
         $this->runChildOnce();
 
-        while (true) {
-            // tiny sleep to avoid pegging CPU
-            usleep(300_000); // 300ms
+        for (;;) {
+            usleep(300_000);
 
             $currentState = $this->snapshotFiles();
 
@@ -75,34 +53,35 @@ final class Watcher
                 $lastState = $currentState;
 
                 $this->clearScreen();
-                $this->printBanner("file change detected, re-running tests…");
+                $this->printBanner('file change detected, re-running tests...');
                 $this->runChildOnce();
             }
         }
     }
 
     /**
-     * Take a snapshot => array(filepath => mtime int)
+     * @return array<string, int>
      */
     private function snapshotFiles(): array
     {
         $files = [];
 
-        foreach ($this->watchGlobs as $pattern) {
-            foreach ($this->globRecursive($pattern) as $file) {
-                if (is_file($file)) {
-                    $files[$file] = @filemtime($file) ?: 0;
+        foreach ($this->watchPatterns as $pattern) {
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_file($file) && is_readable($file)) {
+                    $files[$file] = (int) (filemtime($file) ?: 0);
                 }
             }
         }
 
         ksort($files);
+
         return $files;
     }
 
     /**
-     * Compare two snapshots.
-     * If any file added/removed/mtime changed => true
+     * @param array<string, int> $old
+     * @param array<string, int> $new
      */
     private function changed(array $old, array $new): bool
     {
@@ -111,10 +90,7 @@ final class Watcher
         }
 
         foreach ($new as $path => $mtime) {
-            if (!array_key_exists($path, $old)) {
-                return true;
-            }
-            if ($old[$path] !== $mtime) {
+            if (!array_key_exists($path, $old) || $old[$path] !== $mtime) {
                 return true;
             }
         }
@@ -122,142 +98,134 @@ final class Watcher
         return false;
     }
 
-    /**
-     * Run the test suite in a FRESH php process with the same flags
-     * (no --watch this time).
-     *
-     * We shell out to: php bin/testify.php [--filter x] [--verbose] [--no-colors]
-     */
     private function runChildOnce(): void
     {
-        $php = escapeshellarg(PHP_BINARY);
-
-        $cmd = [$php, escapeshellarg(__DIR__ . '/../bin/testify')];
-
-        if ($this->options['filter'] !== null && $this->options['filter'] !== '') {
-            $cmd[] = '--filter';
-            $cmd[] = escapeshellarg($this->options['filter']);
-        }
-
-        if ($this->options['verbose']) {
-            $cmd[] = '--verbose';
-        }
-
-        if ($this->options['colors'] === false) {
-            $cmd[] = '--no-colors';
-        }
-
-        // join into a command line string
-        $commandline = implode(' ', $cmd);
-
-        // Windows-safe-ish: use `popen/pclose` or `shell_exec`. We'll keep it simple:
-        // We want to stream output live, not just capture after.
-        // proc_open is the most controllable.
-        $descriptorspec = [
-            0 => ['pipe', 'r'],  // STDIN
-            1 => ['pipe', 'w'],  // STDOUT
-            2 => ['pipe', 'w'],  // STDERR
+        $descriptorSpec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
         ];
 
-        $proc = proc_open($commandline, $descriptorspec, $pipes, getcwd());
+        $process = proc_open($this->buildChildCommand(), $descriptorSpec, $pipes, getcwd() ?: null);
 
-        if (!\is_resource($proc)) {
+        if (!is_resource($process)) {
             fwrite(STDERR, "[php-testify:watch] Failed to start child process.\n");
+
             return;
         }
 
-        fclose($pipes[0]); // we won't send input
+        fclose($pipes[0]);
 
-        // Stream stdout/stderr from child to our stdout
         $this->streamPipe($pipes[1], STDOUT);
         $this->streamPipe($pipes[2], STDERR);
 
         fclose($pipes[1]);
         fclose($pipes[2]);
 
-        proc_close($proc);
+        proc_close($process);
     }
 
     /**
-     * Copy all available data from $from to $to until EOF.
+     * @return list<string>
+     */
+    public function buildChildCommand(): array
+    {
+        $command = [
+            PHP_BINARY,
+            __DIR__ . '/../bin/testify',
+        ];
+
+        if ($this->options['filter'] !== null && $this->options['filter'] !== '') {
+            $command[] = '--filter';
+            $command[] = $this->options['filter'];
+        }
+
+        if ($this->options['verbose']) {
+            $command[] = '--verbose';
+        }
+
+        if ($this->options['colors'] === false) {
+            $command[] = '--no-colors';
+        }
+
+        return $command;
+    }
+
+    /**
+     * @param resource $from
+     * @param resource $to
      */
     private function streamPipe($from, $to): void
     {
         stream_set_blocking($from, false);
 
-        // read until EOF
         while (!feof($from)) {
             $chunk = fgets($from);
             if ($chunk === false) {
-                // brief pause before next attempt
                 usleep(10_000);
                 continue;
             }
+
             fwrite($to, $chunk);
         }
     }
 
     /**
-     * crude recursive glob:
-     * - pattern may contain "**" meaning recurse directories
-     * - we expand ** manually
+     * @return list<string>
      */
-    private function globRecursive(string $pattern): array
+    private function buildWatchPatterns(): array
     {
-        // if no ** just glob it normally
-        if (strpos($pattern, '**') === false) {
-            $g = glob($pattern) ?: [];
-            return $g;
+        $config = require $this->configFile;
+        if (!is_array($config)) {
+            throw new RuntimeException("Config file must return array: {$this->configFile}");
         }
 
-        // split on ** to get base dir and tail pattern
-        // e.g. /path/src/**/.php  -> base=/path/src/  tail=/*.php
-        [$base, $tail] = explode('**', $pattern, 2);
-        if ($base === '') {
-            $base = '.';
+        $projectRoot = dirname($this->configFile);
+        $patterns = [realpath($this->configFile) ?: $this->configFile];
+
+        $bootstrap = $config['bootstrap'] ?? null;
+        if (is_string($bootstrap) && $bootstrap !== '') {
+            $patterns[] = $bootstrap;
         }
 
-        $base = rtrim($base, '/\\');
-
-        $results = [];
-
-        // BFS / DFS directory walk
-        $dirs = [$base];
-        while ($dirs) {
-            $dir = array_pop($dirs);
-            // match current dir with tail
-            $g = glob($dir . $tail) ?: [];
-            foreach ($g as $match) {
-                $results[] = $match;
-            }
-
-            // queue subdirs
-            $children = glob($dir . '/*', GLOB_ONLYDIR) ?: [];
-            foreach ($children as $cdir) {
-                $dirs[] = $cdir;
+        $testPatterns = $config['test_patterns'] ?? [];
+        if (is_array($testPatterns)) {
+            foreach ($testPatterns as $pattern) {
+                if (is_string($pattern) && $pattern !== '') {
+                    $patterns[] = $pattern;
+                }
             }
         }
 
-        return $results;
+        foreach (['src', 'tests'] as $directory) {
+            $fullPath = $projectRoot . DIRECTORY_SEPARATOR . $directory;
+            if (is_dir($fullPath)) {
+                $patterns[] = $fullPath . DIRECTORY_SEPARATOR . '*.php';
+                $patterns[] = $fullPath . DIRECTORY_SEPARATOR . '*' . DIRECTORY_SEPARATOR . '*.php';
+            }
+        }
+
+        $normalized = array_values(array_unique(array_filter($patterns, static fn (mixed $value): bool => is_string($value) && $value !== '')));
+        sort($normalized);
+
+        return $normalized;
     }
 
     private function clearScreen(): void
     {
-        // We keep this lightweight. On Windows modern terminals accept ANSI clear.
-        // If someone doesn't want clears in CI they just won't use --watch in CI.
         if ($this->supportsAnsi()) {
-            // ESC[2J = clear screen, ESC[H = cursor home
             echo "\033[2J\033[H";
-        } else {
-            echo str_repeat(PHP_EOL, 50);
+            return;
         }
+
+        echo str_repeat(PHP_EOL, 50);
     }
 
-    private function printBanner(string $msg = "watch mode active"): void
+    private function printBanner(string $message = 'watch mode active'): void
     {
-        $bar = str_repeat('═', 50);
+        $bar = str_repeat('=', 50);
         echo $bar . PHP_EOL;
-        echo "[php-testify] {$msg}" . PHP_EOL;
+        echo "[php-testify] {$message}" . PHP_EOL;
         echo "Press Ctrl+C to stop." . PHP_EOL;
         echo $bar . PHP_EOL . PHP_EOL;
     }
@@ -265,9 +233,9 @@ final class Watcher
     private function supportsAnsi(): bool
     {
         if (DIRECTORY_SEPARATOR === '\\') {
-            // assume Windows 10+ terminal where ANSI is fine
             return true;
         }
+
         return function_exists('posix_isatty')
             ? @posix_isatty(STDOUT) === true
             : true;

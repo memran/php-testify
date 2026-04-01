@@ -1,8 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 use function Testify\describe;
-use function Testify\it;
 use function Testify\expect;
+use function Testify\it;
 
 describe('Math basics', function () {
 
@@ -16,8 +18,8 @@ describe('Math basics', function () {
         expect($value)->toEqual(10); // == ok
     });
 
-    it('fails on purpose (to see printer)', function () {
+    it('compares strictly when values match', function () {
         $x = 100;
-        expect($x)->toBe(200, 'x should be 200');
+        expect($x)->toBe(100);
     });
 });

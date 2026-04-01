@@ -1,13 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Testify;
 
+use PHPUnit\Framework\TestCase as PhpUnitTestCase;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
 use Throwable;
-
-use PHPUnit\Framework\TestCase as PhpUnitTestCase;
 
 /**
  * Runner for php-testify.
@@ -19,7 +20,6 @@ use PHPUnit\Framework\TestCase as PhpUnitTestCase;
  * - Slowest-suites benchmark
  * - Status: PASS / FAIL / SKIP / INCOMPLETE / WARN
  * - Compact summary table
- * 
  */
 final class Runner
 {
@@ -31,7 +31,7 @@ final class Runner
 
     /**
      * @param string $configFile Absolute path to phpunit.config.php
-     * @param array{filter:?string,colors:bool,verbose:bool} $options
+     * @param array{filter?:?string,colors?:bool,verbose?:bool} $options
      */
     public function __construct(string $configFile, array $options = [
         'filter'  => null,
@@ -97,11 +97,8 @@ final class Runner
             throw new RuntimeException("No test_patterns defined in config.");
         }
 
-        foreach ($patterns as $pattern) {
-            $files = glob($pattern) ?: [];
-            foreach ($files as $file) {
-                require_once $file;
-            }
+        foreach ($this->expandTestFiles($patterns) as $file) {
+            require_once $file;
         }
     }
 
@@ -139,7 +136,7 @@ final class Runner
             if ($filter !== null && $filter !== '') {
                 $methods = array_values(array_filter(
                     $methods,
-                    fn($m) => stripos($m, $filter) !== false
+                    fn ($m) => stripos($m, $filter) !== false
                 ));
             }
 
@@ -154,7 +151,21 @@ final class Runner
             echo " Suite: {$className}" . PHP_EOL;
             echo $bar . PHP_EOL;
 
-            $this->callStaticIfExists($className, 'setUpBeforeClass');
+            try {
+                $this->callStaticIfExists($className, 'setUpBeforeClass');
+            } catch (Throwable $throwable) {
+                $this->recordSuiteLifecycleFailure(
+                    $className,
+                    $methods,
+                    'setUpBeforeClass',
+                    $throwable,
+                    $globalStats,
+                    $verbose,
+                    $useColor
+                );
+
+                continue;
+            }
 
             foreach ($methods as $methodName) {
                 $globalStats['total']++;
@@ -230,7 +241,25 @@ final class Runner
                 }
             }
 
-            $this->callStaticIfExists($className, 'tearDownAfterClass');
+            try {
+                $this->callStaticIfExists($className, 'tearDownAfterClass');
+            } catch (Throwable $throwable) {
+                $globalStats['total']++;
+                $globalStats['failed']++;
+
+                [$tagText, $tagColor] = $this->statusPresentation('FAIL');
+                echo '  ' . $this->color($tagText, $tagColor, $useColor)
+                    . '  '
+                    . $this->padRight($className . '::tearDownAfterClass', 40)
+                    . ' '
+                    . $this->dim('suite lifecycle', $useColor)
+                    . PHP_EOL;
+                echo '        '
+                    . $this->color('↳ ', $tagColor, $useColor)
+                    . 'Suite teardown failed: '
+                    . $throwable->getMessage()
+                    . PHP_EOL;
+            }
 
             $suiteEnd = microtime(true);
 
@@ -296,6 +325,9 @@ final class Runner
      *   Total | Pass | Fail | Skipped | Incomplete | Warning | Time (ms) | ExitCode
      *
      * We align and draw a box for readability in CI logs.
+     */
+    /**
+     * @param array{total:int,passed:int,failed:int,skipped:int,incomplete:int,warned:int} $stats
      */
     private function renderSummaryTable(array $stats, float $totalDurSec, int $exitCode, bool $useColor): string
     {
@@ -382,6 +414,27 @@ final class Runner
         $out = [];
 
         foreach (get_declared_classes() as $class) {
+            if (!is_subclass_of($class, PhpUnitTestCase::class)) {
+                continue;
+            }
+
+            $reflection = new ReflectionClass($class);
+            if ($reflection->isAbstract()) {
+                continue;
+            }
+
+            if ($reflection->isInternal()) {
+                continue;
+            }
+
+            if (str_starts_with($class, 'PHPUnit\\')) {
+                continue;
+            }
+
+            if ($reflection->getFileName() === false) {
+                continue;
+            }
+
             if (is_subclass_of($class, PhpUnitTestCase::class)) {
                 $out[] = $class;
             }
@@ -453,7 +506,6 @@ final class Runner
         }
 
         $rm = new ReflectionMethod($obj, $method);
-        $rm->setAccessible(true);
         $rm->invoke($obj);
     }
 
@@ -467,7 +519,6 @@ final class Runner
         }
 
         $rm = new ReflectionMethod($className, $method);
-        $rm->setAccessible(true);
         $rm->invoke(null);
     }
 
@@ -477,7 +528,6 @@ final class Runner
     private function callRequired(object $obj, string $method): void
     {
         $rm = new ReflectionMethod($obj, $method);
-        $rm->setAccessible(true);
         $rm->invoke($obj);
     }
 
@@ -538,6 +588,9 @@ final class Runner
     /**
      * Map status to [label, colorKey].
      */
+    /**
+     * @return array{0:string,1:string}
+     */
     private function statusPresentation(string $status): array
     {
         return match ($status) {
@@ -569,12 +622,6 @@ final class Runner
      * For top suites we stored duration in seconds already,
      * so we can convert by calling msOnly().
      */
-    private function fmtMsFloat(float $startSec, float $endSec): string
-    {
-        $ms = ($endSec - $startSec) * 1000.0;
-        return number_format($ms, 2) . 'ms';
-    }
-
     private function color(string $text, string $kind, bool $useColor): string
     {
         if (!$useColor) {
@@ -636,5 +683,66 @@ final class Runner
     {
         // match ESC[...]m
         return preg_replace('/\x1B\[[0-9;]*m/', '', $text) ?? $text;
+    }
+
+    /**
+     * @param list<mixed> $patterns
+     * @return list<string>
+     */
+    private function expandTestFiles(array $patterns): array
+    {
+        $files = [];
+
+        foreach ($patterns as $pattern) {
+            if (!is_string($pattern) || $pattern === '') {
+                throw new RuntimeException('test_patterns must only contain non-empty strings.');
+            }
+
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_file($file) && is_readable($file)) {
+                    $files[] = $file;
+                }
+            }
+        }
+
+        $files = array_values(array_unique($files));
+        sort($files);
+
+        return $files;
+    }
+
+    /**
+     * @param list<string> $methods
+     * @param array<string, int> $globalStats
+     */
+    private function recordSuiteLifecycleFailure(
+        string $className,
+        array $methods,
+        string $phase,
+        Throwable $throwable,
+        array &$globalStats,
+        bool $verbose,
+        bool $useColor
+    ): void {
+        [$tagText, $tagColor] = $this->statusPresentation('FAIL');
+        $methods = $methods === [] ? ['suite lifecycle'] : $methods;
+
+        foreach ($methods as $methodName) {
+            $globalStats['total']++;
+            $globalStats['failed']++;
+
+            $label = $verbose
+                ? "{$className}::{$methodName}"
+                : $methodName;
+
+            echo '  ' . $this->color($tagText, $tagColor, $useColor)
+                . '  ' . $this->padRight($label, 40)
+                . ' ' . $this->dim('suite lifecycle', $useColor)
+                . PHP_EOL;
+            echo '        '
+                . $this->color('↳ ', $tagColor, $useColor)
+                . "Suite {$phase} failed: {$throwable->getMessage()}"
+                . PHP_EOL;
+        }
     }
 }

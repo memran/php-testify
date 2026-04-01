@@ -19,15 +19,19 @@
     }
   ],
   "require": {
-    "php": "^8.0",
-    "phpunit/phpunit": " ^11.0"
+    "php": "^8.2",
+    "phpunit/phpunit": "^11.0"
+  },
+  "require-dev": {
+    "friendsofphp/php-cs-fixer": "^3.76",
+    "phpstan/phpstan": "^1.12"
   },
   "autoload": {
     "psr-4": {
       "Testify\\": "src/"
     },
     "files": [
-      "src/testify.php"
+      "src/functions.php"
     ]
   },
   "bin": [
@@ -39,7 +43,21 @@
     }
   },
   "scripts": {
-    "test": "php bin/testify"
+    "test": "vendor/bin/phpunit --configuration phpunit.xml.dist",
+    "test:coverage": "vendor/bin/phpunit --configuration phpunit.xml.dist --coverage-text",
+    "test:package": "php bin/testify --no-colors",
+    "analyse": "vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --no-progress --debug",
+    "lint": "vendor/bin/php-cs-fixer fix --dry-run --diff --verbose --sequential",
+    "fix": "vendor/bin/php-cs-fixer fix --verbose --sequential",
+    "ci": [
+      "@lint",
+      "@analyse",
+      "@test",
+      "@test:package"
+    ]
+  },
+  "config": {
+    "sort-packages": true
   },
   "minimum-stability": "stable",
   "prefer-stable": true
