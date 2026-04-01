@@ -1,14 +1,17 @@
 {
   "name": "memran/php-testify",
-  "description": "A modern, expressive testing library for PHP that makes writing tests enjoyable and readable.",
+  "description": "Expressive PHP testing on top of PHPUnit with expect() assertions, describe()/it() specs, and watch mode.",
   "keywords": [
     "phpunit",
+    "php",
     "test",
     "vitest",
     "jest",
     "watch",
     "bdd",
-    "expect"
+    "expect",
+    "tdd",
+    "testing"
   ],
   "type": "library",
   "license": "MIT",
@@ -24,7 +27,7 @@
   },
   "require-dev": {
     "friendsofphp/php-cs-fixer": "^3.76",
-    "phpstan/phpstan": "^1.12"
+    "phpstan/phpstan": "^2.1"
   },
   "autoload": {
     "psr-4": {
@@ -46,7 +49,7 @@
     "test": "vendor/bin/phpunit --configuration phpunit.xml.dist",
     "test:coverage": "vendor/bin/phpunit --configuration phpunit.xml.dist --coverage-text",
     "test:package": "php bin/testify --no-colors",
-    "analyse": "vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --no-progress --debug",
+    "analyse": "vendor/bin/phpstan analyse --configuration=phpstan.neon.dist --no-progress --debug --memory-limit=512M",
     "lint": "vendor/bin/php-cs-fixer fix --dry-run --diff --verbose --sequential",
     "fix": "vendor/bin/php-cs-fixer fix --verbose --sequential",
     "ci": [

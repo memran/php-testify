@@ -42,7 +42,7 @@ final class Watcher
         $lastState = $this->snapshotFiles();
 
         $this->printBanner();
-        $this->runChildOnce();
+        $this->runOnce();
 
         for (;;) {
             usleep(300_000);
@@ -54,7 +54,7 @@ final class Watcher
 
                 $this->clearScreen();
                 $this->printBanner('file change detected, re-running tests...');
-                $this->runChildOnce();
+                $this->runOnce();
             }
         }
     }
@@ -98,7 +98,7 @@ final class Watcher
         return false;
     }
 
-    private function runChildOnce(): void
+    public function runOnce(): int
     {
         $descriptorSpec = [
             0 => ['pipe', 'r'],
@@ -110,8 +110,7 @@ final class Watcher
 
         if (!is_resource($process)) {
             fwrite(STDERR, "[php-testify:watch] Failed to start child process.\n");
-
-            return;
+            return 1;
         }
 
         fclose($pipes[0]);
@@ -122,7 +121,7 @@ final class Watcher
         fclose($pipes[1]);
         fclose($pipes[2]);
 
-        proc_close($process);
+        return proc_close($process);
     }
 
     /**
@@ -205,7 +204,7 @@ final class Watcher
             }
         }
 
-        $normalized = array_values(array_unique(array_filter($patterns, static fn (mixed $value): bool => is_string($value) && $value !== '')));
+        $normalized = array_values(array_unique(array_filter($patterns, static fn (string $value): bool => $value !== '')));
         sort($normalized);
 
         return $normalized;

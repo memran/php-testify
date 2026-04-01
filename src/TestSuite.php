@@ -22,8 +22,8 @@ final class TestSuite
      * ]
      *
      * Notes:
-     * - We collect hook callables as they are registered
-     *   so SpecBridge can generate methods that execute them.
+     * - We collect hook callables and test closures as they are registered
+     *   so Runner can execute suites directly without dynamic code generation.
      *
      * @var list<array{
      *   name: string,

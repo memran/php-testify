@@ -34,5 +34,7 @@ final class RunnerIntegrationTest extends TestCase
         self::assertSame(0, $exitCode, $stdout);
         self::assertStringContainsString('Summary', $stdout);
         self::assertStringContainsString('ExitCode', $stdout);
+        self::assertStringContainsString('Suite: php-testify expectation API', $stdout);
+        self::assertStringNotContainsString('Testify\\Generated', $stdout);
     }
 }

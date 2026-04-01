@@ -1,6 +1,20 @@
 # PHP-Testify
 
-PHP-Testify is a lightweight testing layer built on top of PHPUnit. It adds a fluent `expect()` API, `describe()` / `it()` style specs, a custom CLI runner, and watch mode while remaining easy to adopt in plain PHP projects.
+[![CI](https://img.shields.io/github/actions/workflow/status/memran/php-testify/ci.yml?branch=main&label=CI)](https://github.com/memran/php-testify/actions/workflows/ci.yml)
+[![Packagist Version](https://img.shields.io/packagist/v/memran/php-testify)](https://packagist.org/packages/memran/php-testify)
+[![Downloads](https://img.shields.io/packagist/dt/memran/php-testify)](https://packagist.org/packages/memran/php-testify)
+[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4.svg)](https://www.php.net/)
+[![License](https://img.shields.io/packagist/l/memran/php-testify)](LICENSE)
+
+PHP-Testify brings an expressive `expect()` API, `describe()` / `it()` specs, a readable CLI runner, and watch mode to standard PHPUnit-based projects. It stays small, framework-agnostic, and compatible with plain Composer workflows.
+
+## Features
+
+- Fluent assertions such as `toBe()`, `toEqual()`, `toContain()`, `toThrow()`, and negation with `not()`
+- Two test styles in the same project: PHPUnit classes and Jest/Vitest-like specs
+- Built-in lifecycle hooks: `beforeAll`, `afterAll`, `beforeEach`, `afterEach`
+- Filtered runs, verbose output, and watch mode from the `bin/testify` CLI
+- Static analysis, formatting, and CI setup ready for package contributors
 
 ## Requirements
 
@@ -13,7 +27,7 @@ PHP-Testify is a lightweight testing layer built on top of PHPUnit. It adds a fl
 composer require --dev memran/php-testify
 ```
 
-Create `phpunit.config.php` in your project root:
+Create a `phpunit.config.php` file in your project root:
 
 ```php
 <?php
@@ -29,70 +43,132 @@ return [
 
 ## Quick Start
 
+Write your first spec:
+
 ```php
 <?php
+
+declare(strict_types=1);
 
 use function Testify\describe;
 use function Testify\expect;
 use function Testify\it;
 
-describe('array operations', function (): void {
-    it('adds values', function (): void {
-        $numbers = [1, 2, 3];
+describe('cart totals', function (): void {
+    it('adds line items', function (): void {
+        $items = [12, 8, 5];
 
-        expect($numbers)->toContain(2);
-        expect($numbers)->toHaveLength(3);
+        expect(array_sum($items))->toBe(25);
+        expect($items)->toHaveLength(3);
     });
 });
 ```
 
-Run the suite with:
+Run it:
 
 ```bash
 php bin/testify
 ```
 
-Useful flags:
+## Tutorials
+
+### 1. Write a spec with hooks
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use function Testify\beforeEach;
+use function Testify\describe;
+use function Testify\expect;
+use function Testify\it;
+
+describe('account state', function (): void {
+    $balance = 0;
+
+    beforeEach(function () use (&$balance): void {
+        $balance = 100;
+    });
+
+    it('withdraws funds', function () use (&$balance): void {
+        $balance -= 40;
+
+        expect($balance)->toBe(60);
+        expect($balance)->not()->toBe(100);
+    });
+});
+```
+
+### 2. Mix PHPUnit and Testify in one project
+
+`tests/InvoiceCalculatorTest.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+final class InvoiceCalculatorTest extends TestCase
+{
+    public function testRoundsTaxAmount(): void
+    {
+        self::assertSame(13, (int) round(12.6));
+    }
+}
+```
+
+`tests/invoice_expectations_test.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+use function Testify\describe;
+use function Testify\expect;
+use function Testify\it;
+
+describe('invoice presentation', function (): void {
+    it('contains a currency symbol', function (): void {
+        expect('$12.50')->toContain('$');
+    });
+});
+```
+
+### 3. Run focused feedback loops
 
 ```bash
-php bin/testify --filter array
+php bin/testify --filter invoice
 php bin/testify --verbose
 php bin/testify --watch
 ```
 
-## Assertion API
+Use `--filter` to run only matching PHPUnit methods or spec names. Use `--watch` during local development to re-run the suite after file changes without shell interpolation.
 
-Core assertions include:
+## Assertion Examples
 
 ```php
 expect($value)->toBe('exact');
 expect($value)->toEqual(['loose' => 'match']);
 expect($value)->toBeTruthy();
-expect($value)->not()->toBeNull();
 expect($value)->toBeGreaterThan(10);
 expect($array)->toContain('item');
 expect($callable)->toThrow(RuntimeException::class);
-```
-
-Lifecycle hooks are available inside `describe()` blocks:
-
-```php
-beforeAll(fn () => $this->boot());
-beforeEach(fn () => $this->resetState());
-afterEach(fn () => $this->cleanup());
-afterAll(fn () => $this->disconnect());
+expect($object)->toBeInstanceOf(User::class);
+expect($object)->not()->toBeSameObject($otherObject);
 ```
 
 ## Project Layout
 
-- `src/` library runtime, runner, watcher, and assertions
+- `src/` runtime classes, assertions, suite registry, runner, and watch support
 - `bin/testify` CLI entrypoint
-- `tests/` repository fixtures and PHPUnit unit tests
-- `phpunit.config.php` sample config used by the package integration suite
+- `tests/` package fixtures plus PHPUnit coverage for internal behavior
+- `phpunit.config.php` fixture config used by the package integration suite
 
-## Development Workflow
-
-Install dependencies and run the quality gates:
+## Development
 
 ```bash
 composer install
@@ -104,24 +180,26 @@ composer fix
 composer ci
 ```
 
-- `composer test` runs the repository PHPUnit suite from `tests/Unit`
+- `composer test` runs the internal PHPUnit suite from `tests/Unit`
 - `composer test:package` runs the package through its own CLI against fixture specs
 - `composer analyse` runs PHPStan
 - `composer lint` runs PHP-CS-Fixer in dry-run mode
 - `composer fix` applies formatting fixes
+- `composer ci` runs the full local quality gate
 
-## Static Analysis and CI
+## Tooling Status
 
-- PHPStan config: `phpstan.neon.dist`
-- PHPUnit config: `phpunit.xml.dist`
-- GitHub Actions workflow: `.github/workflows/ci.yml`
+- PHPStan 2.x configuration: [phpstan.neon.dist](phpstan.neon.dist)
+- PHPUnit configuration: [phpunit.xml.dist](phpunit.xml.dist)
+- GitHub Actions workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml)
+- Contributor guide: [AGENTS.md](AGENTS.md)
 
 ## Security and Production Notes
 
-- Watch mode spawns the child runner without shell command interpolation.
-- The runner validates config files and test pattern entries before loading them.
-- Keep `phpunit.config.php` under source control and point `bootstrap` only to trusted files.
+- Watch mode spawns child processes with argument arrays, not shell-built command strings.
+- The runner validates `bootstrap` and `test_patterns` before loading files.
+- Keep `phpunit.config.php` under version control and point it only at trusted bootstrap files.
 
 ## Contributing
 
-Repository-specific contributor guidance lives in [AGENTS.md](AGENTS.md). Keep changes small, add regression tests for behavior changes, and run `composer ci` before opening a pull request.
+Run `composer ci` before opening a pull request. Keep changes focused, add regression tests for behavior changes, and document any CLI or configuration changes in this README.
