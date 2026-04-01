@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.1.0 — 2026-04-01
 
 - Redesigned the fluent suite registry to support nested suites, per-test metadata, and inherited hook execution
 - Added fluent datasets with `->with([...])`
