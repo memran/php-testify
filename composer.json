@@ -60,6 +60,9 @@
     ]
   },
   "config": {
+    "platform": {
+      "php": "8.2.30"
+    },
     "sort-packages": true
   },
   "minimum-stability": "stable",
